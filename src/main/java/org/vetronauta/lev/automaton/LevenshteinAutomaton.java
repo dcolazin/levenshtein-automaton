@@ -128,7 +128,7 @@ public class LevenshteinAutomaton
                 
                 //If the previous and currently processing chars of both strings are transposed, determine the smallest
                 //edit operation cost between minEditOperationCost and that associated with a hypothetical transposition
-                if(i > 0 && j > 0 && str1.charAt(i) == str2.charAt(j - 1) && str1.charAt(i - 1) == str2.charAt(j))
+                if (i > 0 && j > 0 && str1.charAt(i) == str2.charAt(j - 1) && str1.charAt(i - 1) == str2.charAt(j))
                     minEditOperationCost = Math.min(minEditOperationCost, ancestorMatrixCol[j-1] + curCharEditDistance);
                 
                 currentMatrixCol[j + 1] = minEditOperationCost;
@@ -186,10 +186,10 @@ public class LevenshteinAutomaton
         
         //Loop through the chars in str2, using each along with maxEditDistance and automatonString
         //to execute a transition on currentState until either a failure or accept State is reached
-        for(int i = 0; i < dictionaryStringCharCount; i++)
+        for (int i = 0; i < dictionaryStringCharCount; i++)
         {           
             currentState = currentState.transition(maxEditDistance, str1, str2.charAt(i));
-            if(currentState == null) return false;
+            if (currentState == null) return false;
         }
         /////
         
@@ -218,9 +218,9 @@ public class LevenshteinAutomaton
         //Loop through the States in basedStateLinkedList, and for each, determine if its 
         //members Positions can form a State with currentPosition. If so, create a new State
         //with these set of Positions as members and add it to newBasedLinkedList
-        for(State currentState : basedStateLinkedList)
+        for (State currentState : basedStateLinkedList)
         {
-            if(State.canBeState(currentState, p, maxEditDistance))
+            if (State.canBeState(currentState, p, maxEditDistance))
                 newBasedStateLinkedList.add(new State(currentState, p));
         }
         /////
@@ -251,24 +251,24 @@ public class LevenshteinAutomaton
 
         //Loop through the set of all possible edit distances and boundaries to create 
         //Positions which will be used to creates States that are based by basePosition
-        for(int e = 1; e <= maxEditDistance; e++)
+        for (int e = 1; e <= maxEditDistance; e++)
         {  
-            for(int i = 0; i < maxRelevantSubwordSize; i++)
+            for (int i = 0; i < maxRelevantSubwordSize; i++)
             {
                 //Create a standard position from the current processing edit distance and boundary. If it is
                 //subsumed by basePosition, use it to insert States in to basedStateLinkedList that can be formed
                 //solely by it and the set of Positions appearing as members in the elements of basedStateLinkedList 
                 Position currentPosition = new Position(i, e, false);
-                if(basePosition.subsumes(currentPosition, maxEditDistance))
+                if (basePosition.subsumes(currentPosition, maxEditDistance))
                     procureNewBasedStates(basedStateLinkedList, currentPosition, maxEditDistance);
                 /////
                 
                 //If the t-position with the current processing edit distance and boundary is subsumed by basePosition,
                 //use it to insert States in to basedStateLinkedList in a manner identical to that used above
-                if(i <= (maxRelevantSubwordSize - 2))
+                if (i <= (maxRelevantSubwordSize - 2))
                 {
                     Position currentTPosition = new Position(i, e, true);   
-                    if(basePosition.subsumes(currentPosition, maxEditDistance))
+                    if (basePosition.subsumes(currentPosition, maxEditDistance))
                         procureNewBasedStates(basedStateLinkedList, currentTPosition, maxEditDistance);
                 }
                 /////
@@ -301,7 +301,7 @@ public class LevenshteinAutomaton
         //Loop through the possible relevant subword sizes, collectively using them 
         //to create the set of all possible States, and in turn, ParametricStates
         //in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        for(int i = 0; i < maxRelevantSubwordSize; i++)                         
+        for (int i = 0; i < maxRelevantSubwordSize; i++)                         
         {
             //Create a base state from the current relevant subword size
             Position basePosition = new Position(i, 0, false);
@@ -310,7 +310,7 @@ public class LevenshteinAutomaton
             LinkedList<State> basedStateLinkedList = procureBasedStates(basePosition, maxRelevantSubwordSize, maxEditDistance);
             
             //Add the parametric versions of each state in basedStateLinkedList to parametricStateHashSet
-            for(State currentNewState : basedStateLinkedList) parametricStateHashSet.add(new ParametricState(currentNewState));
+            for (State currentNewState : basedStateLinkedList) parametricStateHashSet.add(new ParametricState(currentNewState));
         }
         /////
         
@@ -330,14 +330,14 @@ public class LevenshteinAutomaton
     {
         //Determine the total number of permutations to be produced
         int totalPermutationCount = 0;
-        for(int i = 1; i < maxBitCount + 1; i++) totalPermutationCount += Math.pow(2, i);
+        for (int i = 1; i < maxBitCount + 1; i++) totalPermutationCount += Math.pow(2, i);
         /////
         
         //ArrayList of AugBitSets which will each represent a binary permutation. "+1" accomodates the empty permutation
         ArrayList<AugBitSet> binaryPermutationContainerArrayList = new ArrayList<AugBitSet>(totalPermutationCount + 1);   
         
         //Add the AugBitSet representstions of the permutations {0} and {1} to binaryPermutationContainerArrayList
-        for(int i = 0; i <= 1; i++)
+        for (int i = 0; i <= 1; i++)
         {
             binaryPermutationContainerArrayList.add(new AugBitSet(1));
             binaryPermutationContainerArrayList.get(binaryPermutationContainerArrayList.size() - 1).set(0, (i == 0 ? false : true));
@@ -347,11 +347,11 @@ public class LevenshteinAutomaton
         //Loop through the AugBitSets in binaryPermutationContainerArrayList, using each to create
         //new permutations (by separately adding a and 1 to the end of each) that are added to the end of
         //the ArrayList. This is done until one is encountered that has a size equal to maxRelevantSubwordSize
-        for(int i = 0; binaryPermutationContainerArrayList.get(i).getRelevantBitSetSize() < maxBitCount; i++)
+        for (int i = 0; binaryPermutationContainerArrayList.get(i).getRelevantBitSetSize() < maxBitCount; i++)
         {
             //Loop through the set [0,1], using each value to create a new binary permutation
             //by appending the value to the end of a copy of the permutation located at i
-            for(int j = 0; j <= 1; j++)
+            for (int j = 0; j <= 1; j++)
             {
                 AugBitSet currentPermutationBitSet = binaryPermutationContainerArrayList.get(i);
                 AugBitSet newPermutationBitSet = new AugBitSet(currentPermutationBitSet.getRelevantBitSetSize() + 1);
@@ -379,7 +379,7 @@ public class LevenshteinAutomaton
      */
     private static void createParametricStateTransitionMap(int maxEditDistance)
     {
-        if(!transitionHashMapContainerHashMap.containsKey(maxEditDistance))     //if the transition map for maxEditDistance does not yet exist
+        if (!transitionHashMapContainerHashMap.containsKey(maxEditDistance))     //if the transition map for maxEditDistance does not yet exist
         {
             //HashMap which will store the transition relationships between the parametrized versions of States in the automaton described by maxEditDistance
             HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap = new HashMap<ParametricState, HashMap<AugBitSet, ParametricState>>();
@@ -394,13 +394,13 @@ public class LevenshteinAutomaton
 
             //Loop through possible characteristic vectors and ParametricStates, using them to
             //create transition relationships that will be represented and stored in transitionHashMap
-            for(AugBitSet characteristicVector : characteristicVectorPermutationContainerArrayList)
+            for (AugBitSet characteristicVector : characteristicVectorPermutationContainerArrayList)
             {
-                for(ParametricState currentParametricState : parametricStateHashSet)
+                for (ParametricState currentParametricState : parametricStateHashSet)
                 {
                     //If States of the form described by currentParametricState have Position 
                     //sets that can fit in a relevant subword of the form descirbed by characteristicVector
-                    if(currentParametricState.getLargestPositionOffset() <= characteristicVector.getRelevantBitSetSize())
+                    if (currentParametricState.getLargestPositionOffset() <= characteristicVector.getRelevantBitSetSize())
                     {
                         //Use currentParametricState to create a dummy state with a minimum boundary of zero
                         State currentConcreteState = currentParametricState.createActualState(0);
@@ -411,7 +411,7 @@ public class LevenshteinAutomaton
                         ParametricState transitionParametricState = null;
 
                         //If the transition yields a non-failure State, get the result State's ParametricState
-                        if(transitionState != null)
+                        if (transitionState != null)
                         {
                             int minimumBoundariesDifference = State.getMinimumBoundariesDifference(currentConcreteState, transitionState);
                             transitionParametricState = new ParametricState(transitionState, minimumBoundariesDifference);
@@ -420,7 +420,7 @@ public class LevenshteinAutomaton
 
                         //Store the transition relationship between currentParametricState, 
                         //characteristicVector, and transitionParametricState in transitionHashMap
-                        if(!transitionHashMap.containsKey(currentParametricState))
+                        if (!transitionHashMap.containsKey(currentParametricState))
                             transitionHashMap.put(currentParametricState, new HashMap<AugBitSet, ParametricState>());
 
                         transitionHashMap.get(currentParametricState).put(characteristicVector, transitionParametricState); 
@@ -517,7 +517,7 @@ public class LevenshteinAutomaton
         //Iterate through charTreeSet, inserting each char in to charArray
         int counter = 0;
         char[] charArray = new char[charCount];
-        for(Character c : charTreeSet) charArray[counter++] = c.charValue();
+        for (Character c : charTreeSet) charArray[counter++] = c.charValue();
         /////
         
         //Transition through the MDAG and automaton in-sync, adding to resultStringLinkedList
@@ -535,19 +535,19 @@ public class LevenshteinAutomaton
             //processing step at the top of the stack. If both the node and state have valid
             //transitions on a particular char, push the resulting transition String, node,
             //and State on the top of the stack
-            for(int i = 0; i < charCount; i++)
+            for (int i = 0; i < charCount; i++)
             {
                 char currentChar = charArray[i];
                 
                 //Execute a transition on the current MDAG node using currentChar
                 Object transitionNode = (mdagIsSimplified ? ((SimpleMDAGNode)currentNodeObj).transition(simpleMDAGArray, currentChar) : ((MDAGNode)currentNodeObj).transition(currentChar));
                 
-                if(transitionNode != null)
+                if (transitionNode != null)
                 {
                     //Execute a transition on the current automaton State using currentChar
                     State transitionState = currentState.transition(maxEditDistance, automatonString, currentChar);
 
-                    if(transitionState != null)
+                    if (transitionState != null)
                     {
                         //Push the resulting processing step on to the top of processingStepStack
                         String transitionPathString = (String)currentProcessingStepDataArray[0] + currentChar;
@@ -555,7 +555,7 @@ public class LevenshteinAutomaton
                         /////
 
                         //If both transitionNode and transitionState are "accepting", add the sequence of chars that lead to them to resultStringLinkedList
-                        if(MDAG.isAcceptNode(transitionNode) && isAcceptState(transitionState, automatonString.length(), maxEditDistance))
+                        if (MDAG.isAcceptNode(transitionNode) && isAcceptState(transitionState, automatonString.length(), maxEditDistance))
                             resultStringLinkedList.add(transitionPathString);
                     }
                 }
@@ -609,7 +609,7 @@ public class LevenshteinAutomaton
         //Iterate through charTreeSet, inserting each char in to charArray
         int counter = 0;
         char[] charArray = new char[charCount];
-        for(Character c : charTreeSet) charArray[counter++] = c.charValue();
+        for (Character c : charTreeSet) charArray[counter++] = c.charValue();
         /////
         
         //Transition through the MDAG and the automaton represented by transitionHashMap in-sync, adding to 
@@ -628,14 +628,14 @@ public class LevenshteinAutomaton
             //processing step at the top of the stack. If both the node and state have valid
             //transitions on a particular char, push the resulting transition String, node,
             //and State on the top of the stack
-            for(int i = 0; i < charCount; i++)
+            for (int i = 0; i < charCount; i++)
             {
                 char currentChar = charArray[i];
 
                 //Execute a transition on the current MDAG node using currentChar     
                 Object transitionNode = (mdagIsSimplified ? ((SimpleMDAGNode)currentNodeObj).transition(simpleMDAGArray, currentChar) : ((MDAGNode)currentNodeObj).transition(currentChar));
                 
-                if(transitionNode != null)
+                if (transitionNode != null)
                 {
                     //Get currentState's relevant subword (with respect to currentChar) and  
                     //use it to get the parametric version of the transition's result State
@@ -643,7 +643,7 @@ public class LevenshteinAutomaton
                     ParametricState transitionParametricState = transitionHashMap.get(currentParametricState).get(rscv);
                     /////
 
-                    if(transitionParametricState != null)
+                    if (transitionParametricState != null)
                     {
                         //Use transitionParametricState to create the actual State that is the result of the transition
                         State transitionState = transitionParametricState.createActualState(currentState.getMinimalBoundary() + transitionParametricState.getTransitionBoundaryOffset());
@@ -654,7 +654,7 @@ public class LevenshteinAutomaton
                         processingStepStack.push(createProcessingStepStackEntry(transitionPathString, transitionNode, transitionState, transitionParametricState));
 
                         //If both transitionNode and transitionState are "accepting", add the sequence of chars that lead to them to resultStringLinkedList
-                        if(MDAG.isAcceptNode(transitionNode) && isAcceptState(transitionState, automatonString.length(), maxEditDistance))
+                        if (MDAG.isAcceptNode(transitionNode) && isAcceptState(transitionState, automatonString.length(), maxEditDistance))
                             resultStringLinkedList.add(transitionPathString);
                     }
                 }
@@ -688,9 +688,9 @@ public class LevenshteinAutomaton
 
         //Loop through the Strings in strCollection, computing the edit distance between each and
         //pertinentStr and adding those to resultStringLinkedList with a distance <= maxEditDistance
-        for(String currentString : strCollection)
+        for (String currentString : strCollection)
         {
-            if(computeEditDistance(pertinentStr, currentString) <= maxEditDistance)
+            if (computeEditDistance(pertinentStr, currentString) <= maxEditDistance)
                 resultStringLinkedList.add(currentString);
         }
         /////
@@ -727,9 +727,9 @@ public class LevenshteinAutomaton
      */
     public static boolean isAcceptState(State s, int automatonStringLength, int automatonMaxEditDistance)
     {
-        for(Position p : s.getMemberPositions())
+        for (Position p : s.getMemberPositions())
         {
-            if(isAcceptingPosition(p, automatonStringLength, automatonMaxEditDistance)) return true;
+            if (isAcceptingPosition(p, automatonStringLength, automatonMaxEditDistance)) return true;
         }
      
         return false;
@@ -746,16 +746,16 @@ public class LevenshteinAutomaton
     {
         HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap = transitionHashMapContainerHashMap.get(maxEditDistance);
         
-        if(transitionHashMap != null)       //if a transition map was created for maxEditDistance
+        if (transitionHashMap != null)       //if a transition map was created for maxEditDistance
         {
             System.out.println("# of parametric states : " + transitionHashMap.size());
         
             //Print out the contents of each HashMap<AugBitSet, ParametricState> keyed by each Parametric state in transitionHashMap
-            for(Map.Entry<ParametricState, HashMap<AugBitSet, ParametricState>> transitionColumn : transitionHashMap.entrySet())
+            for (Map.Entry<ParametricState, HashMap<AugBitSet, ParametricState>> transitionColumn : transitionHashMap.entrySet())
             {
                 System.out.println(transitionColumn.getKey() + "\n");
 
-                for(Map.Entry<AugBitSet, ParametricState> transitionEntry : transitionColumn.getValue().entrySet())
+                for (Map.Entry<AugBitSet, ParametricState> transitionEntry : transitionColumn.getValue().entrySet())
                     System.out.println(transitionEntry.getKey().toString() + "\t" + transitionEntry.getValue());
             }
             /////

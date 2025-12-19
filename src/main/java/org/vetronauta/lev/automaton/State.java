@@ -96,7 +96,7 @@ public class State
         HashSet<Position> prospectiveMemberPositionCollection = new HashSet<Position>();
         
         //Loop through the positions in each state, adding them to prospectiveMemberPositionCollection
-        for(State state : stateCollection) prospectiveMemberPositionCollection.addAll(Arrays.asList(state.memberPositionArray));
+        for (State state : stateCollection) prospectiveMemberPositionCollection.addAll(Arrays.asList(state.memberPositionArray));
         
         //Iterate through prospectiveMemberPositionCollection, removing Positions
         //which are subsubmed by at least one other Position in the set
@@ -114,7 +114,7 @@ public class State
             {
                 Position position2 = (Position)it2.next();
                 
-                if(position2.subsumes(position1, maxEditDistance))
+                if (position2.subsumes(position1, maxEditDistance))
                 {
                     it1.remove();
                     break;
@@ -137,8 +137,7 @@ public class State
      * 
      * @return      an int of the smallest boundary value held by a Position in this State's member set
      */
-    public int getMinimalBoundary()
-    {
+    public int getMinimalBoundary() {
         return memberPositionArray[0].getI();
     }
     
@@ -149,8 +148,7 @@ public class State
      
      * @return      an array of Positions contained in this State
      */
-    public Position[] getMemberPositions()
-    {
+    public Position[] getMemberPositions() {
         return memberPositionArray;
     }
     
@@ -177,9 +175,9 @@ public class State
         
         //Loop through the chars in relevantSubword, setting the corresponding bit in
         //relevantSubwordCharacteristicVector to true if it is equal to letter, and false otherwise
-        for(int i = 0; i < relevantSubwordSize; i++)
+        for (int i = 0; i < relevantSubwordSize; i++)
         {
-            if(relevantSubword.charAt(i) == letter)
+            if (relevantSubword.charAt(i) == letter)
                 relevantSubwordCharacteristicVector.set(i);
         }
         /////
@@ -209,10 +207,10 @@ public class State
 
         //Perform a transition on each member position, adding the resulting
         //State to newStateHashSet provided it isn't a failure state
-        for(Position p : memberPositionArray)
+        for (Position p : memberPositionArray)
         {
             State transitionState = p.transition(maxEditDistance, p.getI() - boundaryOffset, relevantSubwordCharacteristicVector);
-            if(transitionState != null) newStateHashSet.add(transitionState);
+            if (transitionState != null) newStateHashSet.add(transitionState);
         }
         /////
 
@@ -245,12 +243,11 @@ public class State
      *              of this State's member positions
      */
     @Override
-    public String toString()
-    {
+    public String toString() {
         String returnString = memberPositionArray[0].toString();
         
         int memberPositionCount = memberPositionArray.length;
-        for(int i = 1; i < memberPositionCount; i++)
+        for (int i = 1; i < memberPositionCount; i++)
             returnString += " " + memberPositionArray[i].toString();
         
         return returnString;
@@ -274,9 +271,9 @@ public class State
     {
         //Loop through the Positions in state's member Position array, determining
         //(and returning false if) any subsume prospectivePosition
-        for(Position currentMemberPosition : state.memberPositionArray)
+        for (Position currentMemberPosition : state.memberPositionArray)
         {
-            if(currentMemberPosition.subsumes(prospectivePosition, maxEditDistance))
+            if (currentMemberPosition.subsumes(prospectivePosition, maxEditDistance))
                 return false;
         }
         /////

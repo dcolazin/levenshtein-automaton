@@ -46,8 +46,7 @@ public class AugBitSet extends BitSet
     /**
      * Constructs an AugBitSet object.
      */
-    public AugBitSet()
-    {  
+    public AugBitSet() {  
         super();  
     }  
    
@@ -153,11 +152,11 @@ public class AugBitSet extends BitSet
     {
         boolean areEqual = (this == obj);
         
-        if(!areEqual && obj != null && obj.getClass().equals(AugBitSet.class))
+        if (!areEqual && obj != null && obj.getClass().equals(AugBitSet.class))
         {
             AugBitSet abs = (AugBitSet)obj;
             
-            if(this.relevantBitSetSize == abs.relevantBitSetSize)
+            if (this.relevantBitSetSize == abs.relevantBitSetSize)
             {
                 int i = 0;
                 while(i < this.relevantBitSetSize && this.get(i) == abs.get(i)){i++;}             
@@ -181,7 +180,7 @@ public class AugBitSet extends BitSet
     {
         int hash = 7;
         
-        for(int i = 0; i < relevantBitSetSize; i++) 
+        for (int i = 0; i < relevantBitSetSize; i++) 
             hash = 83 * hash + (super.get(i) ? 1231 : 1237) + (i + 53);
         
         return hash;   
@@ -196,10 +195,9 @@ public class AugBitSet extends BitSet
      *              in this AugBitSet's relevant bit set, enclosed by "{}"
      */
     @Override
-    public String toString()
-    {
+    public String toString() {
         StringBuilder strBuilder = new StringBuilder("{");
-        for(int i = 0; i < relevantBitSetSize; i++) strBuilder.append(super.get(i) ? "1" : "0");
+        for (int i = 0; i < relevantBitSetSize; i++) strBuilder.append(super.get(i) ? "1" : "0");
         return strBuilder.append("}").toString();
     }
 }

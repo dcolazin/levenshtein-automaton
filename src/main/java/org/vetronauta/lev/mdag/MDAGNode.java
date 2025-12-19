@@ -80,7 +80,7 @@ public class MDAGNode
         
         //Loop through the nodes in this node's outgoing transition set, incrementing the number of
         //incoming transitions of each by 1 (to account for this newly created node's outgoing transitions)
-        for(Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap.entrySet())
+        for (Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap.entrySet())
             transitionKeyValuePair.getValue().incomingTransitionCount++;
         /////
     }
@@ -99,7 +99,7 @@ public class MDAGNode
         isAcceptNode = node.isAcceptNode;
         outgoingTransitionTreeMap = new TreeMap<Character, MDAGNode>(node.outgoingTransitionTreeMap);
         
-        for(Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap.entrySet())
+        for (Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap.entrySet())
             transitionKeyValuePair.getValue().incomingTransitionCount++;
     }
     
@@ -110,8 +110,7 @@ public class MDAGNode
      
      * @return      an MDAGNode possessing the same accept state status and outgoing transitions as this node
      */
-    public MDAGNode clone()
-    {
+    public MDAGNode clone() {
         return new MDAGNode(this);
     }
     
@@ -142,14 +141,12 @@ public class MDAGNode
      * @return      the index in a simplified mdag data array that this node's transition set begins at,
      *              or -1 if its transition set is not present in such an array
      */
-    public int getTransitionSetBeginIndex()
-    {
+    public int getTransitionSetBeginIndex() {
         return transitionSetBeginIndex;
     }
     
     
-     public Entry<Character, MDAGNode> getLastTransition()
-    {
+     public Entry<Character, MDAGNode> getLastTransition() {
         return outgoingTransitionTreeMap.lastEntry();
     }
     
@@ -160,8 +157,7 @@ public class MDAGNode
      
      * @return      an int representing this node's number of outgoing transitions
      */
-    public int getOutgoingTransitionCount()
-    {
+    public int getOutgoingTransitionCount() {
         return outgoingTransitionTreeMap.size();
     }
     
@@ -172,8 +168,7 @@ public class MDAGNode
      
      * @return      an int representing this node's number of incoming transitions
      */
-    public int getIncomingTransitionCount()
-    {
+    public int getIncomingTransitionCount() {
         return incomingTransitionCount;
     }
     
@@ -185,8 +180,7 @@ public class MDAGNode
      
      * @return      true if this node has two or more incoming transitions, false otherwise
      */
-    public boolean isConfluenceNode()
-    {
+    public boolean isConfluenceNode() {
         return (incomingTransitionCount > 1);
     }
     
@@ -197,8 +191,7 @@ public class MDAGNode
      
      * @return      true if this node is an accept state, false otherwise
      */
-    public boolean isAcceptNode()
-    {
+    public boolean isAcceptNode() {
         return isAcceptNode;
     }
     
@@ -248,8 +241,7 @@ public class MDAGNode
      
      * @return      true if this node has at least one outgoing transition, false otherwise
      */
-    public boolean hasOutgoingTransitions()
-    {
+    public boolean hasOutgoingTransitions() {
         return !outgoingTransitionTreeMap.isEmpty();
     }
     
@@ -282,10 +274,10 @@ public class MDAGNode
         MDAGNode currentNode = this;
         
         //Iteratively transition through the MDAG using the chars in str
-        for(int i = 0; i < charCount; i++)
+        for (int i = 0; i < charCount; i++)
         {
             currentNode = currentNode.transition(str.charAt(i));
-            if(currentNode == null) break;
+            if (currentNode == null) break;
         }
         /////
         
@@ -311,7 +303,7 @@ public class MDAGNode
         
         //Iteratively transition through the MDAG using the chars in str,
         //putting each encountered node in nodeStack
-        for(int i = 0; i < numberOfChars && currentNode != null; i++)
+        for (int i = 0; i < numberOfChars && currentNode != null; i++)
         {
             currentNode = currentNode.transition(str.charAt(i));
             nodeStack.add(currentNode);
@@ -329,8 +321,7 @@ public class MDAGNode
      * @return      a TreeMap containing entries collectively representing
      *              all of this node's outgoing transitions
      */
-    public TreeMap<Character, MDAGNode> getOutgoingTransitions()
-    {
+    public TreeMap<Character, MDAGNode> getOutgoingTransitions() {
         return outgoingTransitionTreeMap;
     }
     
@@ -340,9 +331,8 @@ public class MDAGNode
      * Decrements (by 1) the incoming transition counts of all of the nodes
      * that are targets of outgoing transitions from this node.
      */
-    public void decrementTargetIncomingTransitionCounts()
-    {
-        for(Entry<Character, MDAGNode> transitionKeyValuePair: outgoingTransitionTreeMap.entrySet())
+    public void decrementTargetIncomingTransitionCounts() {
+        for (Entry<Character, MDAGNode> transitionKeyValuePair: outgoingTransitionTreeMap.entrySet())
             transitionKeyValuePair.getValue().incomingTransitionCount--;
     }
     
@@ -423,16 +413,16 @@ public class MDAGNode
         TreeMap<Character, MDAGNode> outgoingTransitionTreeMap1 = node1.outgoingTransitionTreeMap;
         TreeMap<Character, MDAGNode> outgoingTransitionTreeMap2 = node2.outgoingTransitionTreeMap;
         
-        if(outgoingTransitionTreeMap1.size() == outgoingTransitionTreeMap2.size())
+        if (outgoingTransitionTreeMap1.size() == outgoingTransitionTreeMap2.size())
         {
             //For each transition in outgoingTransitionTreeMap1, get the identically lableed transition
             //in outgoingTransitionTreeMap2 (if present), and test the equality of the transitions' target nodes
-            for(Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap1.entrySet())
+            for (Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap1.entrySet())
             {
                 Character currentCharKey = transitionKeyValuePair.getKey();
                 MDAGNode currentTargetNode = transitionKeyValuePair.getValue();
                 
-                if(!outgoingTransitionTreeMap2.containsKey(currentCharKey) || !outgoingTransitionTreeMap2.get(currentCharKey).equals(currentTargetNode))
+                if (!outgoingTransitionTreeMap2.containsKey(currentCharKey) || !outgoingTransitionTreeMap2.get(currentCharKey).equals(currentTargetNode))
                     return false;
             }
             /////
@@ -448,8 +438,7 @@ public class MDAGNode
     /**
      * Clears this node's stored hash value
      */
-    public void clearStoredHashCode()
-    {
+    public void clearStoredHashCode() {
         storedHashCode = null;
     }
     
@@ -469,7 +458,7 @@ public class MDAGNode
     {
         boolean areEqual = (this == obj);
         
-        if(!areEqual && obj != null && obj.getClass().equals(MDAGNode.class))
+        if (!areEqual && obj != null && obj.getClass().equals(MDAGNode.class))
         {
             MDAGNode node = (MDAGNode)obj;
             areEqual = (isAcceptNode == node.isAcceptNode && haveSameTransitions(this, node));
@@ -489,7 +478,7 @@ public class MDAGNode
     @Override
     public int hashCode() {
         
-        if(storedHashCode == null)
+        if (storedHashCode == null)
         {
             int hash = 7;
             hash = 53 * hash + (this.isAcceptNode ? 1 : 0);

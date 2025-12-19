@@ -71,7 +71,7 @@ public class ParametricState
         //Loop through stateMemberPositionArray (which contains positions sorted in ascending order),
         //inserting the relative (from the minimal boundary) boundaries and absolute edit distance 
         //and T values in to the corresponding indices of the relevant arrays 
-        for(int i = 0; i < memberPositionCount; i++)
+        for (int i = 0; i < memberPositionCount; i++)
         {
             memberPositionBoundaryOffsetArray[i] = stateMemberPositionArray[i].getI() - stateMemberPositionArray[0].getI();
             memberPositionEArray[i] = stateMemberPositionArray[i].getE();
@@ -103,8 +103,7 @@ public class ParametricState
      
      * @return      an int denoting the largest boundary of a position in a State of this form
      */
-    public int getLargestPositionOffset()
-    {
+    public int getLargestPositionOffset() {
         return memberPositionBoundaryOffsetArray[memberPositionBoundaryOffsetArray.length - 1];
     }
     
@@ -116,8 +115,7 @@ public class ParametricState
      * @return      an int denoting the difference between the minimal boundary of a  
      *              State of this form and that of a State that has a transition to it
      */
-    public int getTransitionBoundaryOffset()
-    {
+    public int getTransitionBoundaryOffset() {
         return transitionBoundaryOffset;
     }
     
@@ -143,7 +141,7 @@ public class ParametricState
         //Loop through memberPositionBoundaryOffsetArray, memberPositionEArray and memberPositionTArray,
         //using the values in the corresponding indices of each (along with minimalBoundary)
         //to create Positions to be inserted in to the corresponding index in stateMemberPositionArray
-        for(int i = 0; i < memberPositionCount; i++)
+        for (int i = 0; i < memberPositionCount; i++)
         {
             int currentBoundaryOffset = memberPositionBoundaryOffsetArray[i];
             int currentE = memberPositionEArray[i];
@@ -173,7 +171,7 @@ public class ParametricState
     {
         boolean areEqual = (this == obj);
         
-        if(!areEqual && obj != null && obj.getClass().equals(ParametricState.class))
+        if (!areEqual && obj != null && obj.getClass().equals(ParametricState.class))
         {
            ParametricState pState = (ParametricState)obj;
             
@@ -211,15 +209,14 @@ public class ParametricState
      *              as well as its transitionBoundaryOffset (if it != 0)
      */
     @Override
-    public String toString()
-    {
+    public String toString() {
         String returnString = "i" + (memberPositionTArray[0] ? "(t)" : "") + "#" + memberPositionEArray[0] +  ")";
         
         int memberPositionCount = memberPositionBoundaryOffsetArray.length;
-        for(int i = 1; i < memberPositionCount; i++)
+        for (int i = 1; i < memberPositionCount; i++)
             returnString += " (i + " + memberPositionBoundaryOffsetArray[i] + ")" + (memberPositionTArray[i] ? "(t)" : "") + "(#" + memberPositionEArray[i] + ")";
          
-        if(transitionBoundaryOffset != 0) returnString += " " + transitionBoundaryOffset;
+        if (transitionBoundaryOffset != 0) returnString += " " + transitionBoundaryOffset;
         
         return returnString;
     }

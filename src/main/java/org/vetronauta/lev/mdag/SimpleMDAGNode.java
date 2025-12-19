@@ -68,8 +68,7 @@ public class SimpleMDAGNode
      
      * @return      the char representing the transition label leading up to this node
      */
-    public char getLetter()
-    {
+    public char getLetter() {
         return letter;
     }
     
@@ -80,8 +79,7 @@ public class SimpleMDAGNode
      
      * @return      true if this node is an accept state, false otherwise
      */
-    public boolean isAcceptNode()
-    {
+    public boolean isAcceptNode() {
         return isAcceptNode;
     }
     
@@ -92,8 +90,7 @@ public class SimpleMDAGNode
      
      * @return      an int of the index in this node's containing array at which its transition set begins
      */
-    public int getTransitionSetBeginIndex()
-    {
+    public int getTransitionSetBeginIndex() {
         return transitionSetBeginIndex;
     }
     
@@ -104,8 +101,7 @@ public class SimpleMDAGNode
      
      * @return      an int denoting the size of this node's outgoing transition set
      */
-    public int getOutgoingTransitionSetSize()
-    {
+    public int getOutgoingTransitionSetSize() {
         return transitionSetSize;
     }
     
@@ -138,9 +134,9 @@ public class SimpleMDAGNode
         
         //Loop through the SimpleMDAGNodes in this node's transition set, searching for
         //the one with a letter equal to that which labels the desired transition
-        for(int i = transitionSetBeginIndex; i < onePastTransitionSetEndIndex; i++)
+        for (int i = transitionSetBeginIndex; i < onePastTransitionSetEndIndex; i++)
         {
-            if(mdagDataArray[i].getLetter() == letter)
+            if (mdagDataArray[i].getLetter() == letter)
             {
                 targetNode = mdagDataArray[i];
                 break;
@@ -167,10 +163,10 @@ public class SimpleMDAGNode
         int numberOfChars = str.length();
         
         //Iteratively transition through the MDAG using the chars in str
-        for(int i = 0; i < numberOfChars; i++)
+        for (int i = 0; i < numberOfChars; i++)
         {
             currentNode = currentNode.transition(mdagDataArray, str.charAt(i));
-            if(currentNode == null) break;
+            if (currentNode == null) break;
         }
         /////
         
@@ -195,9 +191,9 @@ public class SimpleMDAGNode
         //Loop through the SimpleMDAGNodes in the processing MDAG's source node's transition set, 
         //searching for the the one with a letter (char) equal to the first char of str.
         //We can use that target node to transition through the MDAG with the rest of the string
-        for(int i = 0; i < sourceNode.transitionSetSize; i++)
+        for (int i = 0; i < sourceNode.transitionSetSize; i++)
         {
-            if(mdagDataArray[i].getLetter() == firstLetter)
+            if (mdagDataArray[i].getLetter() == firstLetter)
                 return mdagDataArray[i].transition(mdagDataArray, str.substring(1));
         }
         /////

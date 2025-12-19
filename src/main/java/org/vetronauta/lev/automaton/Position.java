@@ -101,7 +101,7 @@ public class Position implements Comparable<Position>
          */
         public Position execute(Position p, int hitIndex)
         {
-            if(!this.equals(FAILURE))
+            if (!this.equals(FAILURE))
             {
                 int newI = p.getI() + (this.equals(DELETION) ? hitIndex + 1 : I_OFFSET);        //for deletion, newI represents the # of boundaries to hitIndex (0-based arrays, so we require +1)
                 int newE = p.getE() + (this.equals(DELETION) ? (hitIndex + 1) - 1 : E_OFFSET);  //for deletion, newE represents the # of boundaries up to but not including hitIndex (0-based arrays, so simply hitIndex)
@@ -145,8 +145,7 @@ public class Position implements Comparable<Position>
      
      * @return      an int representing this Position's boundary 
      */
-    public int getI()
-    {
+    public int getI() {
         return I;
     }
     
@@ -157,8 +156,7 @@ public class Position implements Comparable<Position>
      
      * @return      an int representing this Position's presumed executed edit operation count
      */
-    public int getE()
-    {
+    public int getE() {
         return E;
     }
     
@@ -169,8 +167,7 @@ public class Position implements Comparable<Position>
      
      * @return      an boolean denoting whether or not this Position is a transposition position
      */
-    public boolean getT()
-    {
+    public boolean getT() {
         return T;
     }
     
@@ -332,14 +329,14 @@ public class Position implements Comparable<Position>
         
         //Loop through the ElementaryTransitionTerms in elementaryTransition, executing each on this Position
         //and storing each resulting Position in possibleNewPositionHashSet, provided it is a valid position
-        for(ElementaryTransitionTerm currentTerm : elementaryTransition)
+        for (ElementaryTransitionTerm currentTerm : elementaryTransition)
         {
             Position transitionPosition = currentTerm.execute(this, hitIndex);
-            if(transitionPosition != null) possibleNewPositionHashSet.add(transitionPosition);
+            if (transitionPosition != null) possibleNewPositionHashSet.add(transitionPosition);
         }
         /////
  
-        if(!possibleNewPositionHashSet.isEmpty())       //If the transition execution resulted in at least one valid Position, produce an
+        if (!possibleNewPositionHashSet.isEmpty())       //If the transition execution resulted in at least one valid Position, produce an
         {                                                   //array version of the result set, sort it and use it to create and return a State
             Position[] positionArray = possibleNewPositionHashSet.toArray(new Position[possibleNewPositionHashSet.size()]);
             Arrays.sort(positionArray);
@@ -376,7 +373,7 @@ public class Position implements Comparable<Position>
         //AugBitSet which will represent the characteristic vector of this Position's relevant subowrd
         AugBitSet relevantSubwordCharacteristicVector;
         
-        if(relevantSubwordStartIndex < parentStateRelevantSubwordCharacteristicVector.getRelevantBitSetSize())
+        if (relevantSubwordStartIndex < parentStateRelevantSubwordCharacteristicVector.getRelevantBitSetSize())
         {
             relevantSubwordSize = Math.min(maxEditDistance - E + 1, parentStateRelevantSubwordCharacteristicVector.getRelevantBitSetSize() - relevantSubwordStartIndex);
             
@@ -431,14 +428,14 @@ public class Position implements Comparable<Position>
      */
     public boolean subsumes(Position p, int maxEditDistance)
     {
-        if(this.T)
+        if (this.T)
         {
-            if(p.T)   return (this.E < p.E && this.I == p.I);
+            if (p.T)   return (this.E < p.E && this.I == p.I);
             else      return ((p.E == maxEditDistance) && (p.E > this.E) && (this.I == p.I));
         }
         else
         {
-            if(p.T)   return (this.E < p.E && !(Math.abs(p.I - (this.I - 1)) > (p.E - this.E)));
+            if (p.T)   return (this.E < p.E && !(Math.abs(p.I - (this.I - 1)) > (p.E - this.E)));
             else      return (this.E < p.E && !(Math.abs(p.I - this.I) > (p.E - this.E)));
         }
        
@@ -460,12 +457,12 @@ public class Position implements Comparable<Position>
     @Override
     public int compareTo(Position p2) 
     {
-        if(this.I == p2.I)
+        if (this.I == p2.I)
         {
             int eComparisonResultInt = Integer.compare(this.E, p2.E); 
             return (eComparisonResultInt == 0 ? Boolean.compare(this.T, p2.T) : eComparisonResultInt);
         }
-        else if(this.I < p2.I)
+        else if (this.I < p2.I)
             return -1;
         else
             return 1;
@@ -488,7 +485,7 @@ public class Position implements Comparable<Position>
     {
         boolean areEqual = (this == obj);
         
-        if(!areEqual && obj != null && obj.getClass().equals(Position.class))
+        if (!areEqual && obj != null && obj.getClass().equals(Position.class))
         {
             Position ps = (Position)obj;
             areEqual = (this.I == ps.I && this.E == ps.E && this.T == ps.T);
@@ -522,8 +519,7 @@ public class Position implements Comparable<Position>
      *          and presumed executed edit operation count 
      */
     @Override
-    public String toString()
-    {
+    public String toString() {
         return this.I + (this.T ? "(t)" : "") + "(#" + this.E + ")";
     }
 }
