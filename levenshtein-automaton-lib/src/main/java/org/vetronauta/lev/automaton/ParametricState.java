@@ -37,15 +37,15 @@ public class ParametricState
 {
     //Array of ints containing the relative boundary values of positions in a State of this form.
     //This array, like the State position array it will be based off, will contain values in ascending order.
-    private final int memberPositionBoundaryOffsetArray[];
+    private final int[] memberPositionBoundaryOffsetArray;
     
     //Array of ints containing the edit distance values of positions in a State of this form. Though this array
     //is based off a State position array, its values may not necessarily be stored in ascending order.
-    private final int memberPositionEArray[];
+    private final int[] memberPositionEArray;
     
     //Array of booleans containing values each denoting the transposition position 
     //status of a member position in a state of this form.
-    private final boolean memberPositionTArray[];
+    private final boolean[] memberPositionTArray;
     
     //Int denoting the difference between the minimal boundary of a State of this form and 
     //that of a given State which has a transition such a State. This value is dependant on 
@@ -208,14 +208,14 @@ public class ParametricState
      */
     @Override
     public String toString() {
-        String returnString = "i" + (memberPositionTArray[0] ? "(t)" : "") + "#" + memberPositionEArray[0] +  ")";
+        StringBuilder returnString = new StringBuilder("i" + (memberPositionTArray[0] ? "(t)" : "") + "#" + memberPositionEArray[0] + ")");
         
         int memberPositionCount = memberPositionBoundaryOffsetArray.length;
         for (int i = 1; i < memberPositionCount; i++)
-            returnString += " (i + " + memberPositionBoundaryOffsetArray[i] + ")" + (memberPositionTArray[i] ? "(t)" : "") + "(#" + memberPositionEArray[i] + ")";
+            returnString.append(" (i + ").append(memberPositionBoundaryOffsetArray[i]).append(")").append(memberPositionTArray[i] ? "(t)" : "").append("(#").append(memberPositionEArray[i]).append(")");
          
-        if (transitionBoundaryOffset != 0) returnString += " " + transitionBoundaryOffset;
+        if (transitionBoundaryOffset != 0) returnString.append(" ").append(transitionBoundaryOffset);
         
-        return returnString;
+        return returnString.toString();
     }
 }

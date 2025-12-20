@@ -62,7 +62,7 @@ public class MDAGNode
     public MDAGNode(boolean isAcceptNode)
     {
         this.isAcceptNode = isAcceptNode;     
-        outgoingTransitionTreeMap = new TreeMap<Character, MDAGNode>(); 
+        outgoingTransitionTreeMap = new TreeMap<>();
     }
 
     
@@ -76,7 +76,7 @@ public class MDAGNode
     private MDAGNode(MDAGNode node)
     {
         isAcceptNode = node.isAcceptNode;
-        outgoingTransitionTreeMap = new TreeMap<Character, MDAGNode>(node.outgoingTransitionTreeMap);
+        outgoingTransitionTreeMap = new TreeMap<>(node.outgoingTransitionTreeMap);
         
         //Loop through the nodes in this node's outgoing transition set, incrementing the number of
         //incoming transitions of each by 1 (to account for this newly created node's outgoing transitions)
@@ -88,22 +88,9 @@ public class MDAGNode
     {
         this.id = id;
         this.isAcceptNode = isAcceptNode;     
-        outgoingTransitionTreeMap = new TreeMap<Character, MDAGNode>(); 
+        outgoingTransitionTreeMap = new TreeMap<>();
     }
-    
-    
-    private MDAGNode(MDAGNode node, int id)
-    {
-        this.id = id;
-        isAcceptNode = node.isAcceptNode;
-        outgoingTransitionTreeMap = new TreeMap<Character, MDAGNode>(node.outgoingTransitionTreeMap);
-        
-        for (Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap.entrySet())
-            transitionKeyValuePair.getValue().incomingTransitionCount++;
-    }
-    
-    
-    
+
     /**
      * Creates an MDAGNode possessing the same accept state status and outgoing transitions as this node.
      
@@ -144,13 +131,7 @@ public class MDAGNode
         return transitionSetBeginIndex;
     }
     
-    
-     public Entry<Character, MDAGNode> getLastTransition() {
-        return outgoingTransitionTreeMap.lastEntry();
-    }
-    
-    
-    
+
     /**
      * Retrieves this node's outgoing transition count.
      
@@ -294,7 +275,7 @@ public class MDAGNode
      */
     public Stack<MDAGNode> getTransitionPathNodes(String str)
     {
-        Stack<MDAGNode> nodeStack = new Stack<MDAGNode>();
+        Stack<MDAGNode> nodeStack = new Stack<>();
         
         MDAGNode currentNode = this;
         int numberOfChars = str.length();
@@ -368,19 +349,7 @@ public class MDAGNode
         outgoingTransitionTreeMap.put(letter, newTargetNode);
         return newTargetNode;
     }
-    
-    
-     public MDAGNode addOutgoingTransition(char letter, boolean isEndOfWord, int id)
-    {
-        MDAGNode newTargetNode = new MDAGNode(isEndOfWord, id);
-        newTargetNode.incomingTransitionCount++;
-        newTargetNode.id = id;
-        
-        outgoingTransitionTreeMap.put(letter, newTargetNode);
-        return newTargetNode;
-    }
-    
-    
+
     
     /**
      * Removes a transition labeled with a given char. This only removes the connection

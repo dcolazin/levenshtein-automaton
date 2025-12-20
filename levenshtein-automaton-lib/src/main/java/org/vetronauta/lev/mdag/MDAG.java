@@ -22,10 +22,6 @@
 
 package org.vetronauta.lev.mdag;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,13 +54,13 @@ public class MDAG
     private SimpleMDAGNode[] mdagDataArray;
     
     //HashSet which will contain the set of unique characters used as transition labels in the MDAG
-    private TreeSet<Character> charTreeSet = new TreeSet<Character>();
+    private TreeSet<Character> charTreeSet = new TreeSet<>();
     
     //An int denoting the total number of transitions between the nodes of the MDAG
     private int transitionCount;
     
     //Enum containing fields collectively denoting the set of all conditions that can be applied to a search on the MDAG
-    private static enum SearchCondition {
+    private enum SearchCondition {
         NO_SEARCH_CONDITION, PREFIX_SEARCH_CONDITION, SUBSTRING_SEARCH_CONDITION, SUFFIX_SEARCH_CONDITION; 
         
         /**
@@ -99,50 +95,8 @@ public class MDAG
 
             return satisfiesSearchCondition;
         }
-    };
-    /////
-    
-
-    
-    /**
-     * Creates an MDAG from a newline delimited file containing the data of interest.
-     
-     * @param dataFile          a {@link File} representation of a file
-     *                          containing the Strings that the MDAG will contain 
-     * @throws IOException      if {@code datafile} cannot be opened, or a read operation on it cannot be carried out
-     */
-    public MDAG(File dataFile) throws IOException
-    {
-        BufferedReader dataFileBufferedReader = new BufferedReader(new FileReader(dataFile));
-        String currentString = "";
-        String previousString = "";
-        
-        //Read all the lines in dataFile and add the String contained in each to the MDAG.
-        while((currentString = dataFileBufferedReader.readLine()) != null)
-        {
-            int mpsIndex = calculateMinimizationProcessingStartIndex(previousString, currentString);
-            
-            //If the transition path of the previousString needs to be examined for minimization or 
-            //equivalence class representation after a certain point, call replaceOrRegister to do so.
-            if (mpsIndex != -1)
-            {
-                String transitionSubstring = previousString.substring(0, mpsIndex);
-                String minimizationProcessingSubstring = previousString.substring(mpsIndex);
-                replaceOrRegister(sourceNode.transition(transitionSubstring), minimizationProcessingSubstring);
-            }
-    
-            addStringInternal(currentString); 
-            previousString = currentString;  
-        }
-
-        //Since we delay the minimization of the previously-added String
-        //until after we read the next one, we need to have a seperate
-        //statement to minimize the absolute last String.
-        replaceOrRegister(sourceNode, previousString);
     }
-    
-    
-    
+
      /**
      * Creates an MDAG from a collection of Strings.
      
@@ -193,27 +147,7 @@ public class MDAG
         else
             throw new UnsupportedOperationException("MDAG is simplified. Unable to add additional Strings.");  
     }
-    
-    
-    
-    /**
-     * Adds a string to the MDAG.
-     
-     * @param str       the String to be added to the MDAG 
-     */
-    public void addString(String str)
-    {
-        if (sourceNode != null)
-        {
-            addStringInternal(str);
-            replaceOrRegister(sourceNode, str);
-        }
-        else
-            throw new UnsupportedOperationException("MDAG is simplified. Unable to add additional Strings.");  
-    }
-    
-    
-    
+
     private void splitTransitionPath(MDAGNode originNode, String storedStringSubstr)
     {
         HashMap<String, Object> firstConfluenceNodeDataHashMap = getTransitionPathFirstConfluenceNodeData(originNode, storedStringSubstr);
@@ -346,7 +280,7 @@ public class MDAG
             //The substring before this point, however, does not, since currStr will simply be extending the right languages of the 
             //nodes on its transition path.
             int shortestStringLength = Math.min(prevStr.length(), currStr.length());
-            for (mpsIndex = 0; mpsIndex < shortestStringLength && prevStr.charAt(mpsIndex) == currStr.charAt(mpsIndex); mpsIndex++){};
+            for (mpsIndex = 0; mpsIndex < shortestStringLength && prevStr.charAt(mpsIndex) == currStr.charAt(mpsIndex); mpsIndex++){}
             }
         else                    
             mpsIndex =  -1;    //If the prevStr is a prefix of currStr, then currStr simply extends the right language of the transition path of prevStr. 
@@ -763,7 +697,7 @@ public class MDAG
      * @return      a HashSet containing all the Strings that have been inserted into the MDAG
      */
     public HashSet<String> getAllStrings() {  
-        HashSet<String> strHashSet = new HashSet<String>();
+        HashSet<String> strHashSet = new HashSet<>();
         
         if (sourceNode != null)
             getStrings(strHashSet, SearchCondition.NO_SEARCH_CONDITION, null, "", sourceNode.getOutgoingTransitions());
@@ -783,7 +717,7 @@ public class MDAG
      */
     public HashSet<String> getStringsStartingWith(String prefixStr)
     {
-        HashSet<String> strHashSet = new HashSet<String>();
+        HashSet<String> strHashSet = new HashSet<>();
         
         if (sourceNode != null)      //if the MDAG hasn't been simplified
         {
@@ -819,7 +753,7 @@ public class MDAG
      */
     public HashSet<String> getStringsWithSubstring(String str)
     {
-        HashSet<String> strHashSet = new HashSet<String>();
+        HashSet<String> strHashSet = new HashSet<>();
          
         if (sourceNode != null)      //if the MDAG hasn't been simplified
             getStrings(strHashSet, SearchCondition.SUBSTRING_SEARCH_CONDITION, str, "", sourceNode.getOutgoingTransitions());
@@ -839,7 +773,7 @@ public class MDAG
      */
     public HashSet<String> getStringsEndingWith(String suffixStr)
     {
-        HashSet<String> strHashSet = new HashSet<String>();
+        HashSet<String> strHashSet = new HashSet<>();
         
         if (sourceNode != null)      //if the MDAG hasn't been simplified
             getStrings(strHashSet, SearchCondition.SUFFIX_SEARCH_CONDITION, suffixStr, "", sourceNode.getOutgoingTransitions());
@@ -926,7 +860,7 @@ public class MDAG
     
     
     public int getNodeCount() {
-        return countNodes(sourceNode, new HashSet<Integer>());
+        return countNodes(sourceNode, new HashSet<>());
     }
     
     public int getEquivalenceClassCount() {

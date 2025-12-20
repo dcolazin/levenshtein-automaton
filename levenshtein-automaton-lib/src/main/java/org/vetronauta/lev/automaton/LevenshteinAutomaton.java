@@ -32,7 +32,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
-import java.util.Map;
 import java.util.Stack;
 import java.util.TreeSet;
 
@@ -203,7 +202,7 @@ public class LevenshteinAutomaton
     private static void procureNewBasedStates(LinkedList<State> basedStateLinkedList, Position p, int maxEditDistance)
     {
         //LinkedList which will hold all the States based by basePosition that contain currentPosition
-        LinkedList<State> newBasedStateLinkedList = new LinkedList<State>();
+        LinkedList<State> newBasedStateLinkedList = new LinkedList<>();
 
         //Add a State with currentPosition as its sole member to newBasedLinkedList
         newBasedStateLinkedList.add(new State(new Position[] {p}));
@@ -238,7 +237,7 @@ public class LevenshteinAutomaton
     private static LinkedList<State> procureBasedStates(Position basePosition, int maxRelevantSubwordSize, int maxEditDistance)
     {
         //LinkedList which will hold all the States that are based by basePosition
-        LinkedList<State> basedStateLinkedList = new LinkedList<State>();
+        LinkedList<State> basedStateLinkedList = new LinkedList<>();
         basedStateLinkedList.add(new State(new Position[] {basePosition}));
 
         //Loop through the set of all possible edit distances and boundaries to create 
@@ -285,7 +284,7 @@ public class LevenshteinAutomaton
     {
         //HashSet which will contain ParametricState objects representing the forms of every 
         //state in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        HashSet<ParametricState> parametricStateHashSet = new HashSet<ParametricState>();
+        HashSet<ParametricState> parametricStateHashSet = new HashSet<>();
         
         //Loop through the possible relevant subword sizes, collectively using them 
         //to create the set of all possible States, and in turn, ParametricStates
@@ -367,7 +366,7 @@ public class LevenshteinAutomaton
         if (!transitionHashMapContainerHashMap.containsKey(maxEditDistance))     //if the transition map for maxEditDistance does not yet exist
         {
             //HashMap which will store the transition relationships between the parametrized versions of States in the automaton described by maxEditDistance
-            HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap = new HashMap<ParametricState, HashMap<AugBitSet, ParametricState>>();
+            HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap = new HashMap<>();
         
             int maxRelevantSubwordSize = 2 * maxEditDistance + 1;
             
@@ -405,7 +404,7 @@ public class LevenshteinAutomaton
                         //Store the transition relationship between currentParametricState, 
                         //characteristicVector, and transitionParametricState in transitionHashMap
                         if (!transitionHashMap.containsKey(currentParametricState))
-                            transitionHashMap.put(currentParametricState, new HashMap<AugBitSet, ParametricState>());
+                            transitionHashMap.put(currentParametricState, new HashMap<>());
 
                         transitionHashMap.get(currentParametricState).put(characteristicVector, transitionParametricState); 
                                     }
@@ -479,10 +478,10 @@ public class LevenshteinAutomaton
     public static LinkedList<String> iterativeFuzzySearch(int maxEditDistance, String automatonString, MDAG mdag)
     {
         //LinkedList which will contain Strings in mdag that are within maxEditDistance of automatonString
-        LinkedList<String> resultStringLinkedList = new LinkedList<String>();
+        LinkedList<String> resultStringLinkedList = new LinkedList<>();
         
         //Stack to store collections of objects which collectively represent steps in the search process
-        Stack<Object[]> processingStepStack = new Stack<Object[]>();
+        Stack<Object[]> processingStepStack = new Stack<>();
         
         boolean mdagIsSimplified = mdag.getSourceNode().getClass().equals(SimpleMDAGNode.class);
         SimpleMDAGNode[] simpleMDAGArray = mdag.getSimpleMDAGArray();
@@ -497,7 +496,7 @@ public class LevenshteinAutomaton
         //Iterate through charTreeSet, inserting each char in to charArray
         int counter = 0;
         char[] charArray = new char[charCount];
-        for (Character c : charTreeSet) charArray[counter++] = c.charValue();
+        for (Character c : charTreeSet) charArray[counter++] = c;
         
         //Transition through the MDAG and automaton in-sync, adding to resultStringLinkedList
         //the char sequences that lead to both an accept node (MDAG) and accept state (automaton)
@@ -562,14 +561,14 @@ public class LevenshteinAutomaton
     public static LinkedList<String> tableFuzzySearch(int maxEditDistance, String automatonString, MDAG mdag)
     {
         //LinkedList which will contain Strings in mdag that are within maxEditDistance of automatonString
-        LinkedList<String> resultStringLinkedList = new LinkedList<String>();
+        LinkedList<String> resultStringLinkedList = new LinkedList<>();
         
         //HashMap containing the transition relationships between the parametric states of an automaton with maxEditDistance
         createParametricStateTransitionMap(maxEditDistance);
         HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap = transitionHashMapContainerHashMap.get(maxEditDistance);
         
         //Stack to store collections of objects which collectively represent steps in the search process
-        Stack<Object[]> processingStepStack = new Stack<Object[]>();
+        Stack<Object[]> processingStepStack = new Stack<>();
 
         boolean mdagIsSimplified = mdag.getSourceNode().getClass().equals(SimpleMDAGNode.class);
         SimpleMDAGNode[] simpleMDAGArray = mdag.getSimpleMDAGArray();
@@ -584,7 +583,7 @@ public class LevenshteinAutomaton
         //Iterate through charTreeSet, inserting each char in to charArray
         int counter = 0;
         char[] charArray = new char[charCount];
-        for (Character c : charTreeSet) charArray[counter++] = c.charValue();
+        for (Character c : charTreeSet) charArray[counter++] = c;
         
         //Transition through the MDAG and the automaton represented by transitionHashMap in-sync, adding to 
         //resultStringLinkedList the char sequences that lead to both an accept node (MDAG) and accept state (transition map)
@@ -654,7 +653,7 @@ public class LevenshteinAutomaton
      */
     public static LinkedList<String> fuzzySearchNonAutomaton(int maxEditDistance, String pertinentStr, Collection<String> strCollection)
     {
-        LinkedList<String> resultStringLinkedList = new LinkedList<String>();
+        LinkedList<String> resultStringLinkedList = new LinkedList<>();
 
         //Loop through the Strings in strCollection, computing the edit distance between each and
         //pertinentStr and adding those to resultStringLinkedList with a distance <= maxEditDistance
@@ -703,30 +702,5 @@ public class LevenshteinAutomaton
      
         return false;
     }
-    
-    
-    
-    /**
-     * Prints the contents of the transition map created for a particular maximum edit distance.
-     
-     * @param maxEditDistance       an int denoting the edit distance related to the transition map to-be-printed
-     */
-    public static void printTransitionMap(int maxEditDistance)
-    {
-        HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap = transitionHashMapContainerHashMap.get(maxEditDistance);
-        
-        if (transitionHashMap != null)       //if a transition map was created for maxEditDistance
-        {
-            System.out.println("# of parametric states : " + transitionHashMap.size());
-        
-            //Print out the contents of each HashMap<AugBitSet, ParametricState> keyed by each Parametric state in transitionHashMap
-            for (Map.Entry<ParametricState, HashMap<AugBitSet, ParametricState>> transitionColumn : transitionHashMap.entrySet())
-            {
-                System.out.println(transitionColumn.getKey() + "\n");
 
-                for (Map.Entry<AugBitSet, ParametricState> transitionEntry : transitionColumn.getValue().entrySet())
-                    System.out.println(transitionEntry.getKey().toString() + "\t" + transitionEntry.getValue());
-            }
-            }
-    }
 }

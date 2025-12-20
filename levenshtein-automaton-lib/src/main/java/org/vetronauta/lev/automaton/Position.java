@@ -27,7 +27,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 
 
-
 /**
  * A class representing a Position (non-deterministic Levenshstein automate State).
  
@@ -53,11 +52,11 @@ public class Position implements Comparable<Position> {
     private enum StateRelevantSubwordSizeType { ATLEAST_TWO, ONE, ZERO }
     
     //Enum containing fields collectively defining the set of types a position can be typified as
-    private enum PositionType { STANDARD_POSITION, TRANSPOSITION_POSITION };
+    private enum PositionType { STANDARD_POSITION, TRANSPOSITION_POSITION }
     
     //Enum containing fields collectively defining the set of index-location categories of interest 
     //a char can have with those in a Position's relevant subword (of the parent automaton's String)
-    private enum RelevantSubwordHitIndexType { FIRST_INDEX, SECOND_INDEX, TRAILING_INDEX, NO_INDEX };
+    private enum RelevantSubwordHitIndexType { FIRST_INDEX, SECOND_INDEX, TRAILING_INDEX, NO_INDEX }
 
     
     //Enum containing fields collectively defining the set of possible Position transitions
@@ -120,7 +119,6 @@ public class Position implements Comparable<Position> {
     private static final ElementaryTransitionTerm[] TRANSPOSITION_TRANSITION = new ElementaryTransitionTerm[] {ElementaryTransitionTerm.TRANSPOSITION};
     private static final ElementaryTransitionTerm[] INSERTION_TRANSITION = new ElementaryTransitionTerm[] {ElementaryTransitionTerm.INSERTION};
     private static final ElementaryTransitionTerm[] FAILURE_TRANSITION = new ElementaryTransitionTerm[] {ElementaryTransitionTerm.FAILURE};
-    /////
     
     
     
@@ -204,11 +202,10 @@ public class Position implements Comparable<Position> {
                     }
                     case ONE:                       //if this position's boundary is the last boundary in the automaton's String
                     {
-                        switch(rsHitIndexType)
-                        {
-                            case FIRST_INDEX:       return MATCH_TRANSITION;
-                            default:                return INSERTION_SUBSTITUTION_TRANSITION;
+                        if (rsHitIndexType == RelevantSubwordHitIndexType.FIRST_INDEX) {
+                            return MATCH_TRANSITION;
                         }
+                        return INSERTION_SUBSTITUTION_TRANSITION;
                     }
                     default:                        return INSERTION_TRANSITION;    //there are no more boundaries in the automaton's String
                 }
@@ -219,67 +216,52 @@ public class Position implements Comparable<Position> {
                 {
                     case ATLEAST_TWO:               //if there are at least one boundary in the automaton's String after this position's boundary
                     {
-                        switch(pType)
-                        {
-                            case STANDARD_POSITION:
-                            {
-                                switch(rsHitIndexType)
-                                {
-                                    case FIRST_INDEX:       return MATCH_TRANSITION;
-                                    case SECOND_INDEX:      return INSERTION_PRETRANSPOSITION_SUBSTITUTION_DELETION_TRANSITION;
-                                    case TRAILING_INDEX:    return INSERTION_SUBSTITUTION_DELETION_TRANSITION;
-                                    default:                return INSERTION_SUBSTITUTION_TRANSITION;
-                                }
-                            }
-                            default:                //transposition position
-                            {
-                                switch(rsHitIndexType)
-                                {
-                                    case FIRST_INDEX:       return TRANSPOSITION_TRANSITION;
-                                    default:                return FAILURE_TRANSITION;
-                                }
+                        //transposition position
+                        if (pType == PositionType.STANDARD_POSITION) {
+                            switch (rsHitIndexType) {
+                                case FIRST_INDEX:
+                                    return MATCH_TRANSITION;
+                                case SECOND_INDEX:
+                                    return INSERTION_PRETRANSPOSITION_SUBSTITUTION_DELETION_TRANSITION;
+                                case TRAILING_INDEX:
+                                    return INSERTION_SUBSTITUTION_DELETION_TRANSITION;
+                                default:
+                                    return INSERTION_SUBSTITUTION_TRANSITION;
                             }
                         }
+                        if (rsHitIndexType == RelevantSubwordHitIndexType.FIRST_INDEX) {
+                            return TRANSPOSITION_TRANSITION;
+                        }
+                        return FAILURE_TRANSITION;
                     }
                     case ONE:                       //if this position's boundary is the last boundary in the automaton's String
                     {
-                        switch(rsHitIndexType)
-                        {
-                            case FIRST_INDEX:       return MATCH_TRANSITION;
-                            default:                return INSERTION_SUBSTITUTION_TRANSITION;
+                        if (rsHitIndexType == RelevantSubwordHitIndexType.FIRST_INDEX) {
+                            return MATCH_TRANSITION;
                         }
+                        return INSERTION_SUBSTITUTION_TRANSITION;
                     }
                     default:                        return INSERTION_TRANSITION;     //there are no more boundaries in the automaton's String
                 }
             }
             default:                //we are NOT allowed to execute more edit operations 
             {
-                switch(sRSSizeType)
-                {
-                    case ZERO:                      return FAILURE_TRANSITION;   //there are no more boundaries in the automaton's String
-                    default:                        //there is at least one boundary left in this automaton's String
-                    {
-                        switch(pType)               //we use the position's type instead of its relevant subword size to dictate processing from here because doing so produces
-                        {                           //mutually exclusive, covering cases and results in code that is simpler and mirrors the paper's transition table
-                            case STANDARD_POSITION:
-                            {
-                                switch(rsHitIndexType)
-                                {
-                                    case FIRST_INDEX:       return MATCH_TRANSITION;
-                                    default:                return FAILURE_TRANSITION;
-                                }
-                            }
-                            default:                //transposition position
-                            {
-                                switch(rsHitIndexType)
-                                {
-                                    case FIRST_INDEX:       return TRANSPOSITION_TRANSITION;
-                                    default:                return FAILURE_TRANSITION;
-                                }
-                            }
-                        }
+                //there is at least one boundary left in this automaton's String
+                if (sRSSizeType == StateRelevantSubwordSizeType.ZERO) {
+                    return FAILURE_TRANSITION;   //there are no more boundaries in the automaton's String
+                }//we use the position's type instead of its relevant subword size to dictate processing from here because doing so produces
+                //mutually exclusive, covering cases and results in code that is simpler and mirrors the paper's transition table
+                //transposition position
+                if (pType == PositionType.STANDARD_POSITION) {
+                    if (rsHitIndexType == RelevantSubwordHitIndexType.FIRST_INDEX) {
+                        return MATCH_TRANSITION;
                     }
+                    return FAILURE_TRANSITION;
                 }
+                if (rsHitIndexType == RelevantSubwordHitIndexType.FIRST_INDEX) {
+                    return TRANSPOSITION_TRANSITION;
+                }
+                return FAILURE_TRANSITION;
             }
         }
     }
@@ -324,7 +306,7 @@ public class Position implements Comparable<Position> {
         ElementaryTransitionTerm[] elementaryTransition = procureTransition(edRelationType, stateRSSizeType, pType, rsHitIndexType);
 
         //HashSet which will store the result of excecuting the ElementaryTransitionTerms in elementaryTransition on this Position
-        HashSet<Position> possibleNewPositionHashSet = new HashSet<Position>(); 
+        HashSet<Position> possibleNewPositionHashSet = new HashSet<>();
         
         //Loop through the ElementaryTransitionTerms in elementaryTransition, executing each on this Position
         //and storing each resulting Position in possibleNewPositionHashSet, provided it is a valid position

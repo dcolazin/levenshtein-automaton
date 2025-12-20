@@ -190,7 +190,7 @@ public class State
     public State transition(int maxEditDistance, AugBitSet relevantSubwordCharacteristicVector)
     {
         //HashSet which will hold the States resulting from transitioning each Position in memberPositionArray
-        HashSet<State> newStateHashSet = new HashSet<State>();
+        HashSet<State> newStateHashSet = new HashSet<>();
         
         //The int which will be used to determine the index in relevantSubwordCharacteristicVector
         //that the relevant subwords of positions in memberPositionArray start at
@@ -234,13 +234,13 @@ public class State
      */
     @Override
     public String toString() {
-        String returnString = memberPositionArray[0].toString();
+        StringBuilder returnString = new StringBuilder(memberPositionArray[0].toString());
         
         int memberPositionCount = memberPositionArray.length;
         for (int i = 1; i < memberPositionCount; i++)
-            returnString += " " + memberPositionArray[i].toString();
+            returnString.append(" ").append(memberPositionArray[i].toString());
         
-        return returnString;
+        return returnString.toString();
     }
     
     
