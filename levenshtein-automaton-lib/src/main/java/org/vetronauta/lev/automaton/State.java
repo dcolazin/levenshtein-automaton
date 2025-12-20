@@ -96,7 +96,11 @@ public class State
         HashSet<Position> prospectiveMemberPositionCollection = new HashSet<Position>();
         
         //Loop through the positions in each state, adding them to prospectiveMemberPositionCollection
-        for (State state : stateCollection) prospectiveMemberPositionCollection.addAll(Arrays.asList(state.memberPositionArray));
+        for (State state : stateCollection) {
+            for (Position p : state.memberPositionArray) { //PERF: this is in a thigh loop, do not create lists unnecessarily
+                prospectiveMemberPositionCollection.add(p);
+            }
+        }
         
         //Iterate through prospectiveMemberPositionCollection, removing Positions
         //which are subsubmed by at least one other Position in the set
