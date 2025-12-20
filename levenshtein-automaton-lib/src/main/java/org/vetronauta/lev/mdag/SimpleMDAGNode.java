@@ -142,7 +142,6 @@ public class SimpleMDAGNode
                 break;
             }
         }
-        /////
         
         return targetNode;
     }
@@ -168,7 +167,6 @@ public class SimpleMDAGNode
             currentNode = currentNode.transition(mdagDataArray, str.charAt(i));
             if (currentNode == null) break;
         }
-        /////
         
         return currentNode;
     }
@@ -196,7 +194,6 @@ public class SimpleMDAGNode
             if (mdagDataArray[i].getLetter() == firstLetter)
                 return mdagDataArray[i].transition(mdagDataArray, str.substring(1));
         }
-        /////
         
         return null;
     }

@@ -3,7 +3,6 @@ package org.vetronauta.lev.bench;
 import org.openjdk.jmh.annotations.*;
 import org.vetronauta.lev.automaton.LevenshteinAutomaton;
 
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 @Warmup(iterations = 4, time = 1, timeUnit = TimeUnit.SECONDS)
@@ -12,8 +11,6 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Thread)
 public class SimpleBenchmark {
-
-    private static final Random RANDOM = new Random();
 
     @Benchmark
     public boolean classic() {

@@ -73,7 +73,6 @@ public class State
         //Copy the members of the argument State in to the member array of this State, adding the argument position at the end
         memberPositionArray = Arrays.copyOf(s.memberPositionArray, newMemberPositionArrayLength);
         memberPositionArray[newMemberPositionArrayLength - 1] = p;
-        /////
         
         //Sort the (possibly out of order) Positions in this State's member array
         //(p is not guarenteed to be greater than the members of S)
@@ -84,54 +83,44 @@ public class State
     
     /**
      * Creates a State from the Positions serving as members in a collection of States.
-     
+
      * @param stateCollection       a Collection of States
      * @param maxEditDistance       an int of the maximum amount of edit operations allowed by the
      *                              automaton associated with the States in {@code stateCollection} 
      *                              (and commutatively, the to-be-created State)
      */
-    public State(Collection<State> stateCollection, int maxEditDistance)
-    {   
+    State(Collection<State> stateCollection, int maxEditDistance) {
         //HashSet which will contain Positions that will be members of the to-be-created State
-        HashSet<Position> prospectiveMemberPositionCollection = new HashSet<Position>();
-        
+        HashSet<Position> prospectiveMemberPositionCollection = new HashSet<>();
+
         //Loop through the positions in each state, adding them to prospectiveMemberPositionCollection
         for (State state : stateCollection) {
             for (Position p : state.memberPositionArray) { //PERF: this is in a thigh loop, do not create lists unnecessarily
                 prospectiveMemberPositionCollection.add(p);
             }
         }
-        
+
         //Iterate through prospectiveMemberPositionCollection, removing Positions
         //which are subsubmed by at least one other Position in the set
-        Iterator it1 = prospectiveMemberPositionCollection.iterator();
-        while(it1.hasNext())
-        {
+        Iterator<Position> it1 = prospectiveMemberPositionCollection.iterator();
+        while (it1.hasNext()) {
             //Processing position which is assumed to be a susumption target of another Position in the set
-            Position position1 = (Position)it1.next();  
+            Position position1 = it1.next();
             
             //Iterate through prospectiveMemberPositionCollection again, checking for the presence 
             //of a Position which subsumes position1. If such a state exists, remove position1
             //from the set (no longer satisfies membership requirements).
-            Iterator it2 = prospectiveMemberPositionCollection.iterator();
-            while(it2.hasNext())
-            {
-                Position position2 = (Position)it2.next();
-                
-                if (position2.subsumes(position1, maxEditDistance))
-                {
+            for (Position position2 : prospectiveMemberPositionCollection) {
+                if (position2.subsumes(position1, maxEditDistance)) {
                     it1.remove();
                     break;
                 }
             }
-            /////
         }
-        /////
-        
+
         //Convert prospectiveMemberPositionCollection to an array and sort it
         memberPositionArray = prospectiveMemberPositionCollection.toArray(new Position[prospectiveMemberPositionCollection.size()]);
         Arrays.sort(memberPositionArray);
-        /////
     }
     
     
@@ -172,7 +161,6 @@ public class State
         int minimalPositionBoundary = memberPositionArray[0].getI();
         int relevantSubwordSize = Math.min(2 * maxEditDistance + 1, automatonString.length() - minimalPositionBoundary);
         String relevantSubword = automatonString.substring(minimalPositionBoundary, minimalPositionBoundary + relevantSubwordSize);
-        /////
 
         //Create an AugBitSet that will be used represent the characteristic vector of relevantSubword
         AugBitSet relevantSubwordCharacteristicVector = new AugBitSet(relevantSubwordSize);
@@ -184,7 +172,6 @@ public class State
             if (relevantSubword.charAt(i) == letter)
                 relevantSubwordCharacteristicVector.set(i);
         }
-        /////
 
         return relevantSubwordCharacteristicVector;
     }
@@ -216,7 +203,6 @@ public class State
             State transitionState = p.transition(maxEditDistance, p.getI() - boundaryOffset, relevantSubwordCharacteristicVector);
             if (transitionState != null) newStateHashSet.add(transitionState);
         }
-        /////
 
         return (newStateHashSet.isEmpty() ? null : new State(newStateHashSet, maxEditDistance));
     }
@@ -280,7 +266,6 @@ public class State
             if (currentMemberPosition.subsumes(prospectivePosition, maxEditDistance))
                 return false;
         }
-        /////
         
         return true;
     }

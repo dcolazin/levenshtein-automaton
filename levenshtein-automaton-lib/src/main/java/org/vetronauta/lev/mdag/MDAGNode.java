@@ -82,7 +82,6 @@ public class MDAGNode
         //incoming transitions of each by 1 (to account for this newly created node's outgoing transitions)
         for (Entry<Character, MDAGNode> transitionKeyValuePair : outgoingTransitionTreeMap.entrySet())
             transitionKeyValuePair.getValue().incomingTransitionCount++;
-        /////
     }
     
     public MDAGNode(boolean isAcceptNode, int id)
@@ -279,7 +278,6 @@ public class MDAGNode
             currentNode = currentNode.transition(str.charAt(i));
             if (currentNode == null) break;
         }
-        /////
         
         return currentNode;
     }
@@ -308,7 +306,6 @@ public class MDAGNode
             currentNode = currentNode.transition(str.charAt(i));
             nodeStack.add(currentNode);
         }
-        /////
          
         return nodeStack;
     }
@@ -425,8 +422,7 @@ public class MDAGNode
                 if (!outgoingTransitionTreeMap2.containsKey(currentCharKey) || !outgoingTransitionTreeMap2.get(currentCharKey).equals(currentTargetNode))
                     return false;
             }
-            /////
-        }
+            }
         else
             return false;
         

@@ -33,8 +33,8 @@ import java.util.HashSet;
  
  * @author Kevin
  */
-public class Position implements Comparable<Position>
-{
+public class Position implements Comparable<Position> {
+
     //An int representing this position's boundary (next index in the parent automaton's String to be processed)
     private final int I;
     
@@ -46,22 +46,22 @@ public class Position implements Comparable<Position>
     
     //Enum containing fields collectively defining the set of relationship types a 
     //Position's edit operation count can have with a defined maximum edit operation count
-    private static enum EditDistanceRelationType { AT_MAX, NOT_AT_ZERO_AND_NOT_AT_MAX , AT_ZERO_AND_NOT_AT_MAX};
+    private enum EditDistanceRelationType { AT_MAX, NOT_AT_ZERO_AND_NOT_AT_MAX , AT_ZERO_AND_NOT_AT_MAX}
     
     //Enum containing fields collectively defining the categories of relevant subword 
     //meta-sizes that are of interest when executing transitions on Positions
-    private static enum StateRelevantSubwordSizeType { ATLEAST_TWO, ONE, ZERO }
+    private enum StateRelevantSubwordSizeType { ATLEAST_TWO, ONE, ZERO }
     
     //Enum containing fields collectively defining the set of types a position can be typified as
-    private static enum PositionType { STANDARD_POSITION, TRANSPOSITION_POSITION };
+    private enum PositionType { STANDARD_POSITION, TRANSPOSITION_POSITION };
     
     //Enum containing fields collectively defining the set of index-location categories of interest 
     //a char can have with those in a Position's relevant subword (of the parent automaton's String)
-    private static enum RelevantSubwordHitIndexType { FIRST_INDEX, SECOND_INDEX, TRAILING_INDEX, NO_INDEX };
+    private enum RelevantSubwordHitIndexType { FIRST_INDEX, SECOND_INDEX, TRAILING_INDEX, NO_INDEX };
 
     
     //Enum containing fields collectively defining the set of possible Position transitions
-    private static enum ElementaryTransitionTerm 
+    private enum ElementaryTransitionTerm
     {
         //Fields collectively defining the set of possible Position transition operations
         MATCH(1, 0, false), INSERTION(0, 1, false), PRETRANSPOSITION(0, 1, true), TRANSPOSITION(2, 0, false), SUBSTITUTION(1, 1, false), DELETION(0, 0, false),  FAILURE(0, 0, false);
@@ -84,7 +84,7 @@ public class Position implements Comparable<Position>
          * @param eOffset                       an int denoting the executed edit distance difference between the to-be-created term's operand and result positions
          * @param representsTransposition       a boolean denoting whether or not the term representa a transposition transition
          */
-        private ElementaryTransitionTerm(int iOffset, int eOffset, boolean representsTransposition)
+        ElementaryTransitionTerm(int iOffset, int eOffset, boolean representsTransposition)
         {
             I_OFFSET = iOffset; E_OFFSET = eOffset; REPRESENTS_PRETRANSPOSITION = representsTransposition;
         }
@@ -259,7 +259,7 @@ public class Position implements Comparable<Position>
                     case ZERO:                      return FAILURE_TRANSITION;   //there are no more boundaries in the automaton's String
                     default:                        //there is at least one boundary left in this automaton's String
                     {
-                        switch(pType)               //we use the position's type instead of its relevant subword size to dictate processing from here because doing so produces 
+                        switch(pType)               //we use the position's type instead of its relevant subword size to dictate processing from here because doing so produces
                         {                           //mutually exclusive, covering cases and results in code that is simpler and mirrors the paper's transition table
                             case STANDARD_POSITION:
                             {
@@ -267,7 +267,7 @@ public class Position implements Comparable<Position>
                                 {
                                     case FIRST_INDEX:       return MATCH_TRANSITION;
                                     default:                return FAILURE_TRANSITION;
-                                }      
+                                }
                             }
                             default:                //transposition position
                             {
@@ -275,10 +275,10 @@ public class Position implements Comparable<Position>
                                 {
                                     case FIRST_INDEX:       return TRANSPOSITION_TRANSITION;
                                     default:                return FAILURE_TRANSITION;
-                                }   
+                                }
                             }
-                        } 
-                    }   
+                        }
+                    }
                 }
             }
         }
@@ -319,7 +319,6 @@ public class Position implements Comparable<Position>
             case 1:     rsHitIndexType = RelevantSubwordHitIndexType.SECOND_INDEX;      break;
             default:    rsHitIndexType = RelevantSubwordHitIndexType.TRAILING_INDEX;    break;
         }
-        /////
 
         //Use edRelationType, stateRSSizeType, and rsHitIndexType to determine the appropriate transition for this Position
         ElementaryTransitionTerm[] elementaryTransition = procureTransition(edRelationType, stateRSSizeType, pType, rsHitIndexType);
@@ -334,7 +333,6 @@ public class Position implements Comparable<Position>
             Position transitionPosition = currentTerm.execute(this, hitIndex);
             if (transitionPosition != null) possibleNewPositionHashSet.add(transitionPosition);
         }
-        /////
  
         if (!possibleNewPositionHashSet.isEmpty())       //If the transition execution resulted in at least one valid Position, produce an
         {                                                   //array version of the result set, sort it and use it to create and return a State
@@ -426,19 +424,17 @@ public class Position implements Comparable<Position>
      *                              automaton that this Position and {@code p} are associated with
      * @return                      true if this position subsumes {@code p}, false otherwise
      */
-    public boolean subsumes(Position p, int maxEditDistance)
-    {
-        if (this.T)
-        {
-            if (p.T)   return (this.E < p.E && this.I == p.I);
-            else      return ((p.E == maxEditDistance) && (p.E > this.E) && (this.I == p.I));
+    public boolean subsumes(Position p, int maxEditDistance) {
+        if (this.T) {
+            if (p.T) {
+                return (this.E < p.E && this.I == p.I);
+            }
+            return ((p.E == maxEditDistance) && (p.E > this.E) && (this.I == p.I));
         }
-        else
-        {
-            if (p.T)   return (this.E < p.E && !(Math.abs(p.I - (this.I - 1)) > (p.E - this.E)));
-            else      return (this.E < p.E && !(Math.abs(p.I - this.I) > (p.E - this.E)));
+        if (p.T) {
+            return (this.E < p.E && !(Math.abs(p.I - (this.I - 1)) > (p.E - this.E)));
         }
-       
+        return (this.E < p.E && !(Math.abs(p.I - this.I) > (p.E - this.E)));
     }
 
     

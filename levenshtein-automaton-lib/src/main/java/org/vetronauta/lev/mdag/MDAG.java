@@ -130,12 +130,10 @@ public class MDAG
                 String minimizationProcessingSubstring = previousString.substring(mpsIndex);
                 replaceOrRegister(sourceNode.transition(transitionSubstring), minimizationProcessingSubstring);
             }
-            /////
-
+    
             addStringInternal(currentString); 
             previousString = currentString;  
         }
-        /////
 
         //Since we delay the minimization of the previously-added String
         //until after we read the next one, we need to have a seperate
@@ -182,13 +180,11 @@ public class MDAG
                     String minimizationProcessingSubString = previousString.substring(mpsIndex);
                     replaceOrRegister(sourceNode.transition(transitionSubstring), minimizationProcessingSubString);      
                 }
-                /////
-
+        
                 addStringInternal(currentString);
                 previousString = currentString;
             }
-            /////
-
+    
             //Since we delay the minimization of the previously-added String
             //until after we read the next one, we need to have a seperate
             //statement to minimize the absolute last String.
@@ -266,7 +262,6 @@ public class MDAG
             else
                 break;
         }
-        /////
         
         return (transitionPathNodeStack.capacity() - transitionPathNodeStack.size());
     }
@@ -309,8 +304,7 @@ public class MDAG
                     MDAGNode latestNonSoloTransitionPathNode = sourceNode.transition(str.substring(0, toBeRemovedTransitionLabelCharIndex));
                     latestNonSoloTransitionPathNode.removeOutgoingTransition(str.charAt(toBeRemovedTransitionLabelCharIndex));
                     transitionCount -= str.substring(toBeRemovedTransitionLabelCharIndex).length();
-                    /////
-                    
+                                
                     replaceOrRegister(sourceNode, str.substring(0, toBeRemovedTransitionLabelCharIndex));
                 }
 
@@ -353,8 +347,7 @@ public class MDAG
             //nodes on its transition path.
             int shortestStringLength = Math.min(prevStr.length(), currStr.length());
             for (mpsIndex = 0; mpsIndex < shortestStringLength && prevStr.charAt(mpsIndex) == currStr.charAt(mpsIndex); mpsIndex++){};
-            /////
-        }
+            }
         else                    
             mpsIndex =  -1;    //If the prevStr is a prefix of currStr, then currStr simply extends the right language of the transition path of prevStr. 
         
@@ -388,7 +381,6 @@ public class MDAG
             else
                 break;
         }
-        /////
         
         return str.substring(0, onePastPrefixEndIndex);
     }
@@ -423,7 +415,6 @@ public class MDAG
             if (currentNode == null || currentNode.isConfluenceNode())
                 break;
         }
-        /////
         
         boolean noConfluenceNode = (currentNode == originNode  || currentIndex == charCount);
         
@@ -432,7 +423,6 @@ public class MDAG
         HashMap<String, Object> confluenceNodeDataHashMap = new HashMap<String, Object>(2);
         confluenceNodeDataHashMap.put("toConfluenceNodeTransitionCharIndex", (noConfluenceNode ? null : currentIndex));
         confluenceNodeDataHashMap.put("confluenceNode", noConfluenceNode ? null : currentNode);
-        /////
 
         return confluenceNodeDataHashMap;
     }
@@ -458,7 +448,6 @@ public class MDAG
         //this on the next char in order to further processing down the transition path corresponding to str
         if (relevantTargetNode.hasOutgoingTransitions() && !str.substring(1).isEmpty())
             replaceOrRegister(relevantTargetNode, str.substring(1)); 
-        /////
 
         //Get the node representing the equivalence class that relevantTargetNode belongs to. MDAGNodes hash on the
         //transitions paths that can be traversed from them and nodes able to be reached from them;
@@ -501,8 +490,7 @@ public class MDAG
                 
                 charTreeSet.add(currentChar);
             }
-            /////
-        }
+            }
         else
             originNode.setAcceptStateStatus(true);
     }
@@ -562,8 +550,7 @@ public class MDAG
                 String transitionStringToPivotNodeParent = transitionStringToPivotNode.substring(0, transitionStringToPivotNode.length() - 1);
                 char parentTransitionLabelChar = transitionStringToPivotNode.charAt(transitionStringToPivotNode.length() - 1);
                 clonedNode = pivotConfluenceNode.clone(sourceNode.transition(transitionStringToPivotNodeParent), parentTransitionLabelChar);
-                /////
-            }
+                    }
             else
                 clonedNode = currentTargetNode.clone();     //simply clone curentTargetNode
 
@@ -581,9 +568,7 @@ public class MDAG
             //These will be used to establish an equivalent transition to clonedNode from the next clone to be created (it's clone parent).
             lastClonedNode = clonedNode;
             lastTransitionLabelChar = (i > 0 ? str.charAt(i - 1) : '\0');
-            /////
-        }
-        /////
+            }
     }
     
 
@@ -603,7 +588,6 @@ public class MDAG
         HashMap<String, Object> firstConfluenceNodeDataHashMap = getTransitionPathFirstConfluenceNodeData(sourceNode, prefixString);
         MDAGNode firstConfluenceNodeInPrefix = (MDAGNode)firstConfluenceNodeDataHashMap.get("confluenceNode");
         Integer toFirstConfluenceNodeTransitionCharIndex = (Integer) firstConfluenceNodeDataHashMap.get("toConfluenceNodeTransitionCharIndex");
-        /////
         
         //Remove the register entries of all the nodes in the prefixString transition path up to the first confluence node 
         //(those past the confluence node will not need to be removed since they will be cloned and unaffected by the 
@@ -619,7 +603,6 @@ public class MDAG
             String transitionStringOfToBeDuplicatedPath = prefixString.substring(toFirstConfluenceNodeTransitionCharIndex + 1);
             cloneTransitionPath(firstConfluenceNodeInPrefix, transitionStringOfPathToFirstConfluenceNode, transitionStringOfToBeDuplicatedPath);
         }
-        /////
         
         //Add the transition based on suffixString to the end of the (possibly duplicated) transition path corresponding to prefixString
         addTransitionPath(sourceNode.transition(prefixString), suffixString);
@@ -652,8 +635,7 @@ public class MDAG
             char transitionLabelChar = transitionKeyValuePair.getKey();
             MDAGNode transitionTargetNode = transitionKeyValuePair.getValue();
             mdagDataArray[pivotIndex] = new SimpleMDAGNode(transitionLabelChar, transitionTargetNode.isAcceptNode(), transitionTargetNode.getOutgoingTransitionCount());
-            /////
-            
+                
             //If targetTransitionNode's outgoing transition set hasn't been inserted in to mdagDataArray yet, call this method on it to do so. 
             //After this call returns, transitionTargetNode will contain the index in mdagDataArray that its transition set starts from
             if (transitionTargetNode.getTransitionSetBeginIndex() == -1)
@@ -661,7 +643,6 @@ public class MDAG
             
             mdagDataArray[pivotIndex++].setTransitionSetBeginIndex(transitionTargetNode.getTransitionSetBeginIndex());
         }
-        /////
         
         return onePastLastCreatedTransitionSetIndex;
     }
@@ -683,8 +664,7 @@ public class MDAG
             //for garbage collection since they are no longer needed.
             sourceNode = null;
             equivalenceClassMDAGNodeHashMap = null;
-            /////
-        }
+            }
     }
     
     
@@ -738,7 +718,6 @@ public class MDAG
             //Recursively call this to traverse all the valid transition paths from currentNode
             getStrings(strHashSet, searchCondition, searchConditionString, newPrefixString, currentNode.getOutgoingTransitions());    
         }
-        /////
     }
     
     
@@ -774,7 +753,6 @@ public class MDAG
             //Recursively call this to traverse all the valid transition paths from currentNode
             getStrings(strHashSet, searchCondition, searchConditionString, newPrefixString, currentNode);
         }
-        /////
     }
         
     

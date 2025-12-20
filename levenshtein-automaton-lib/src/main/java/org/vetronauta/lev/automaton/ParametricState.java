@@ -77,7 +77,6 @@ public class ParametricState
             memberPositionEArray[i] = stateMemberPositionArray[i].getE();
             memberPositionTArray[i] = stateMemberPositionArray[i].getT();
         }
-        /////
     }
     
     
@@ -149,7 +148,6 @@ public class ParametricState
             
             actualStateMemberPositionArray[i] = new Position(minimalBoundary + currentBoundaryOffset, currentE, currentT);
         }
-        /////
         
         return new State(actualStateMemberPositionArray);
     }
