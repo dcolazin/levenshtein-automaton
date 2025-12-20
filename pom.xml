@@ -9,13 +9,12 @@
     <version>0.1.0-SNAPSHOT</version>
 
     <name>${project.groupId}:${project.artifactId}</name>
-    <description>A Testcontainers 2 module for Karapace</description>
-    <url>https://github.com/dcolazin/karapace-testcontainers</url>
+    <description>A fast implementation of Levenshtein automaton</description>
+    <url>https://github.com/dcolazin/levenshtein-automaton</url>
     <licenses>
         <license>
-            <!-- TODO -->
-            <name>Apache 2.0</name>
-            <url>http://todo</url>
+            <name>Apache License, Version 2.0</name>
+            <url>https://directory.fsf.org/wiki/License:Apache-2.0</url>
         </license>
     </licenses>
     <developers>
