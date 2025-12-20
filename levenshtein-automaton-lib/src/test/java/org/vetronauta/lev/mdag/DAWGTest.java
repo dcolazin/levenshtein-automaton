@@ -30,6 +30,9 @@ import org.testng.annotations.Test;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -47,13 +50,14 @@ public class DAWGTest {
     @BeforeSuite
     public void initializer() throws IOException {
         wordArrayList = new ArrayList<>(100000);
-        BufferedReader breader = new BufferedReader(new FileReader("./src/test/resources/words.txt"));
-        String currentWord;
-        
-        while((currentWord = breader.readLine()) != null) {
-            wordArrayList.add(currentWord);
-        }
+        try (InputStream is = getClass().getResourceAsStream("/words.txt")) {
+            BufferedReader breader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+            String currentWord;
 
+            while ((currentWord = breader.readLine()) != null) {
+                wordArrayList.add(currentWord);
+            }
+        }
         dawg1 = new MDAG(wordArrayList);
         
         Collections.shuffle(wordArrayList);
