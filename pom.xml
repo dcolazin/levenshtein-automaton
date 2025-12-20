@@ -34,6 +34,7 @@
     </developers>
     <modules>
         <module>levenshtein-automaton-lib</module>
+        <module>levenshtein-automaton-bench</module>
     </modules>
 
     <scm>

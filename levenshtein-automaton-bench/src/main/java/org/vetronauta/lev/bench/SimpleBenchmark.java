@@ -1,0 +1,28 @@
+package org.vetronauta.lev.bench;
+
+import org.openjdk.jmh.annotations.*;
+import org.vetronauta.lev.automaton.LevenshteinAutomaton;
+
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+
+@Warmup(iterations = 4, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 4, time = 1, timeUnit = TimeUnit.SECONDS)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@State(Scope.Thread)
+public class SimpleBenchmark {
+
+    private static final Random RANDOM = new Random();
+
+    @Benchmark
+    public boolean classic() {
+        return LevenshteinAutomaton.isWithinEditDistanceNonAutomaton(4, "kitten", "sitting");
+    }
+
+    @Benchmark
+    public boolean automaton() {
+        return LevenshteinAutomaton.isWithinEditDistance(4, "kitten", "sitting");
+    }
+
+}
