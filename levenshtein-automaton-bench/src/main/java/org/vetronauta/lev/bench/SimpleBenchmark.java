@@ -1,6 +1,7 @@
 package org.vetronauta.lev.bench;
 
 import org.openjdk.jmh.annotations.*;
+import org.vetronauta.lev.automaton.ClassicLevenshtein;
 import org.vetronauta.lev.automaton.LevenshteinAutomaton;
 
 import java.util.concurrent.TimeUnit;
@@ -14,7 +15,7 @@ public class SimpleBenchmark {
 
     @Benchmark
     public boolean classic() {
-        return LevenshteinAutomaton.isWithinEditDistanceNonAutomaton(4, "kitten", "sitting");
+        return ClassicLevenshtein.isWithinEditDistanceNonAutomaton(4, "kitten", "sitting");
     }
 
     @Benchmark

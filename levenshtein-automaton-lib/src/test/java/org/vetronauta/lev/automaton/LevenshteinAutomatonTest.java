@@ -90,7 +90,7 @@ public class LevenshteinAutomatonTest {
          HashSet<String> resultHashSet1 = new HashSet<>();
          
          for (String currentWord : wordArrayList) {
-             if (LevenshteinAutomaton.computeEditDistance(str, currentWord) <= maxEditDistance) {
+             if (ClassicLevenshtein.computeEditDistance(str, currentWord) <= maxEditDistance) {
                  resultHashSet1.add(currentWord);
              }
          }
@@ -105,7 +105,7 @@ public class LevenshteinAutomatonTest {
          HashSet<String> resultHashSet1 = new HashSet<>();
          
          for (String currentWord : wordArrayList) {
-             if (LevenshteinAutomaton.computeEditDistance(str, currentWord) <= maxEditDistance) {
+             if (ClassicLevenshtein.computeEditDistance(str, currentWord) <= maxEditDistance) {
                  resultHashSet1.add(currentWord);
              }
          }
@@ -117,7 +117,7 @@ public class LevenshteinAutomatonTest {
      @Test(dataProvider = "automatonWordDataProvider")
      void isWithinEditDistance(int maxEditDistance, String str) {
          for (String currentWord : wordArrayList) {
-             Assert.assertEquals(LevenshteinAutomaton.computeEditDistance(str, currentWord) <= maxEditDistance,
+             Assert.assertEquals(ClassicLevenshtein.computeEditDistance(str, currentWord) <= maxEditDistance,
                  LevenshteinAutomaton.isWithinEditDistance(maxEditDistance, str, currentWord));
          }
      }
