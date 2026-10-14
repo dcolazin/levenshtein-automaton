@@ -19,481 +19,330 @@
  */
 package org.vetronauta.lev.automaton;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.Objects;
 import java.util.Stack;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import org.vetronauta.lev.mdag.MDAG;
 import org.vetronauta.lev.mdag.MDAGNode;
 import org.vetronauta.lev.mdag.SimpleMDAGNode;
 
 /**
- * A utility class that can perform Levenshtein related functions (edit distance calculation, fuzzy
- * search, etc).
+ * A compiled, reusable Levenshtein automaton recognizing every String within a maximum edit
+ * distance of a fixed reference String.
+ *
+ * <p>An instance represents the automaton D(s, n) for {@code lev(s, ·) <= n} and is the unit of
+ * reuse: compile it once and answer any number of membership queries cheaply. Successive calls such
+ * as {@code lev(s, s1) < n} and {@code lev(s, s2) < n} share the compiled instance (and the
+ * process-wide parametric transition table per distance) instead of rebuilding the automaton per
+ * query.
+ *
+ * <pre>{@code
+ * LevenshteinAutomaton automaton = LevenshteinAutomaton.compile("kitten", 2);
+ * automaton.accepts("sitting");        // false, via memoized table lookups
+ * automaton.accepts("mitten");         // true, same instance
+ * automaton.fuzzySearch(dictionary);   // dictionary search reusing the same instance
+ * }</pre>
+ *
+ * <p>Two compilation modes are available:
+ *
+ * <ul>
+ *   <li>{@link #compile(String, int)} — table-based. Transitions resolve through the parametric
+ *       transition table of {@link ParametricAutomaton} (built once per distance, cached
+ *       process-wide). Recommended for max edit distances of at most 2; larger distances require
+ *       huge amounts of memory.
+ *   <li>{@link #compileIterative(String, int)} — table-free. Transitions are computed on the fly
+ *       from member positions (with characteristic vectors still memoized per instance). Advised
+ *       for larger max edit distances.
+ * </ul>
+ *
+ * <p>Instances are immutable after compilation and safe to share across threads (memo maps are
+ * populated lazily via benign races; contents are deterministic functions of the instance).
  *
  * @author Kevin
  */
-public class LevenshteinAutomaton {
-    // A HashMap of Integers to HashMaps which will contain the transition HashMaps created for
-    // various edit distances
-    private static final HashMap<
-                    Integer, HashMap<ParametricState, HashMap<AugBitSet, ParametricState>>>
-            transitionHashMapContainerHashMap = new HashMap<>();
-
-    // The State that will serve as the initial state that all automaton operations will start from
+public final class LevenshteinAutomaton {
+    // The State that serves as the initial state of every (non-table-based) automaton simulation
     private static final State initialState = new State(new Position[] {new Position(0, 0, false)});
 
-    /**
-     * Determines if two Strings are within a specified edit distance of one another. This method is
-     * too slow to use in production: use isWithinEditDistanceNonAutomaton instead.
-     *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed to be
-     *     used to (hypothetically) turn one String in to another
-     * @param str1 a String
-     * @param str2 a String
-     * @return true if {@code str1} and {@code str2} are within {@code maxEditDistance} edit
-     *     operations of each other; false otherwise
-     */
-    public static boolean isWithinEditDistance(int maxEditDistance, String str1, String str2) {
-        State currentState = initialState;
-        int automatonStringCharCount = str1.length();
-        int dictionaryStringCharCount = str2.length();
+    // The reference String that all edit distance calculations carried out by this automaton are
+    // relative to
+    private final String automatonString;
 
-        // Loop through the chars in str2, using each along with maxEditDistance and automatonString
-        // to execute a transition on currentState until either a failure or accept State is reached
-        for (int i = 0; i < dictionaryStringCharCount; i++) {
-            currentState = currentState.transition(maxEditDistance, str1, str2.charAt(i));
+    // The length of automatonString (kept as a field to bypass repeated method calls)
+    private final int automatonStringLength;
+
+    // The maximum amount of edit operations allowed by this automaton
+    private final int maxEditDistance;
+
+    // The string-independent parametric automaton backing table-based operations; null for
+    // instances compiled with compileIterative
+    private final ParametricAutomaton parametricAutomaton;
+
+    // Lazily-populated memo of characteristic vectors, indexed by the minimal boundary of the
+    // consuming State. The vector for a step depends solely on (minimal boundary, letter) given
+    // this automaton's reference String and max edit distance. Buckets are created on first use;
+    // racing threads may briefly create duplicate (equivalent) buckets, which is benign.
+    private final ConcurrentHashMap<Character, AugBitSet>[] characteristicVectorMemoByBoundary;
+
+    /**
+     * Constructs a LevenshteinAutomaton.
+     *
+     * @param automatonString the reference String that all edit distance calculations are to be
+     *     carried out in relation to
+     * @param maxEditDistance the maximum amount of edit operations allowed by the automaton
+     * @param tableBased a boolean denoting whether transitions are to be resolved through the
+     *     parametric transition table (as opposed to being computed on the fly)
+     */
+    private LevenshteinAutomaton(String automatonString, int maxEditDistance, boolean tableBased) {
+        Objects.requireNonNull(automatonString, "automatonString");
+        if (maxEditDistance < 0)
+            throw new IllegalArgumentException(
+                    "maxEditDistance must be non-negative, got " + maxEditDistance);
+
+        this.automatonString = automatonString;
+        this.automatonStringLength = automatonString.length();
+        this.maxEditDistance = maxEditDistance;
+        this.parametricAutomaton =
+                (tableBased ? ParametricAutomaton.forDistance(maxEditDistance) : null);
+
+        @SuppressWarnings("unchecked")
+        ConcurrentHashMap<Character, AugBitSet>[] memo =
+                new ConcurrentHashMap[automatonStringLength + 1];
+        this.characteristicVectorMemoByBoundary = memo;
+    }
+
+    /**
+     * Compiles a table-based Levenshtein automaton for a reference String and maximum edit
+     * distance. The returned instance can be reused for any number of membership queries and
+     * dictionary searches.
+     *
+     * <p>Table-based instances share the parametric transition table built once per max edit
+     * distance (process-wide). Since that table grows roughly with {@code 2^(2n+1)} characteristic
+     * vectors, this mode is recommended for max edit distances of at most 2; use {@link
+     * #compileIterative(String, int)} for larger distances.
+     *
+     * @param automatonString the reference String that all edit distance calculations are to be
+     *     carried out in relation to
+     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by the
+     *     automaton; must be non-negative
+     * @return a reusable LevenshteinAutomaton for {@code lev(automatonString, ·) <=
+     *     maxEditDistance}
+     */
+    public static LevenshteinAutomaton compile(String automatonString, int maxEditDistance) {
+        return new LevenshteinAutomaton(automatonString, maxEditDistance, true);
+    }
+
+    /**
+     * Compiles a table-free Levenshtein automaton whose transitions are computed on the fly (with
+     * characteristic vectors still memoized per instance). Advised for max edit distances greater
+     * than 2, where the parametric transition table would require huge amounts of memory.
+     *
+     * @param automatonString the reference String that all edit distance calculations are to be
+     *     carried out in relation to
+     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by the
+     *     automaton; must be non-negative
+     * @return a reusable LevenshteinAutomaton for {@code lev(automatonString, ·) <=
+     *     maxEditDistance}
+     */
+    public static LevenshteinAutomaton compileIterative(
+            String automatonString, int maxEditDistance) {
+        return new LevenshteinAutomaton(automatonString, maxEditDistance, false);
+    }
+
+    /**
+     * Returns the reference String this automaton carries out edit distance calculations in
+     * relation to.
+     *
+     * @return a String of this automaton's reference String
+     */
+    public String getAutomatonString() {
+        return automatonString;
+    }
+
+    /**
+     * Returns the maximum amount of edit operations allowed by this automaton.
+     *
+     * @return an int of this automaton's max edit distance
+     */
+    public int getMaxEditDistance() {
+        return maxEditDistance;
+    }
+
+    /**
+     * Returns a value indicating whether this automaton resolves transitions through the parametric
+     * transition table.
+     *
+     * @return true if this instance is table-based; false if it computes transitions on the fly
+     */
+    public boolean isTableBased() {
+        return (parametricAutomaton != null);
+    }
+
+    /**
+     * Determines if a String is within this automaton's max edit distance of its reference String.
+     *
+     * @param candidate a String to be checked against this automaton
+     * @return true if {@code candidate} is within {@code maxEditDistance} edit operations of this
+     *     automaton's reference String; false otherwise
+     */
+    public boolean isWithinEditDistance(String candidate) {
+        return accepts(candidate);
+    }
+
+    /**
+     * Determines if a String is within this automaton's max edit distance of its reference String,
+     * i.e. whether it is a member of this automaton's language.
+     *
+     * <p>Table-based instances execute a pure table-lookup walk over the parametric states;
+     * iterative instances simulate the automaton's member positions. In both modes the
+     * characteristic vectors encountered are memoized per instance.
+     *
+     * @param candidate a String to be checked against this automaton
+     * @return true if {@code candidate} is within {@code maxEditDistance} edit operations of this
+     *     automaton's reference String; false otherwise
+     */
+    public boolean accepts(String candidate) {
+        return (parametricAutomaton != null
+                ? acceptsViaTable(candidate)
+                : acceptsViaSimulation(candidate));
+    }
+
+    /**
+     * Carries out a table-lookup walk of the parametric automaton, tracking only the current
+     * parametric state and minimal boundary (no concrete States are materialized).
+     */
+    private boolean acceptsViaTable(String candidate) {
+        ParametricState currentParametricState = parametricAutomaton.getInitialState();
+        int minimalBoundary = 0;
+
+        for (int i = 0; i < candidate.length(); i++) {
+            AugBitSet characteristicVector =
+                    characteristicVector(minimalBoundary, candidate.charAt(i));
+            ParametricState transitionParametricState =
+                    parametricAutomaton.transition(currentParametricState, characteristicVector);
+
+            if (transitionParametricState == null) return false; // failure transition
+
+            minimalBoundary += transitionParametricState.getTransitionBoundaryOffset();
+            currentParametricState = transitionParametricState;
+        }
+
+        return isAcceptingParametricState(currentParametricState, minimalBoundary);
+    }
+
+    /**
+     * Simulates the automaton on the fly from the initial State, transitioning each encountered
+     * State on the memoized characteristic vector of its relevant subword.
+     */
+    private boolean acceptsViaSimulation(String candidate) {
+        State currentState = initialState;
+
+        for (int i = 0; i < candidate.length(); i++) {
+            currentState =
+                    currentState.transition(
+                            maxEditDistance,
+                            characteristicVector(
+                                    currentState.getMinimalBoundary(), candidate.charAt(i)));
             if (currentState == null) return false;
         }
 
-        return isAcceptState(currentState, automatonStringCharCount, maxEditDistance);
+        return isAcceptState(currentState, automatonStringLength, maxEditDistance);
     }
 
     /**
-     * Procures with a collection of commonly based States and a given position, those States which
-     * can be formed using the given position and the set of member positions appearing in the
-     * aforementioned State collection.
+     * Procures (memoized) the characteristic vector of the relevant subword starting at a minimal
+     * boundary, with respect to a letter. Equivalent to {@code
+     * State.getRelevantSubwordCharacteristicVector(maxEditDistance, automatonString, letter)} for a
+     * State with the given minimal boundary.
      *
-     * @param basedStateLinkedList a LinkedList of States collectively based by a given Position
-     * @param p a Position subsumed by the same Position which bases each of the elements in {@code
-     *     basedStateLinkedList}
+     * @param minimalBoundary an int of the minimal boundary of the consuming State's member
+     *     positions
+     * @param letter the char that the characteristic vector is to be based off of
+     * @return an AugBitSet representation of the characteristic vector
      */
-    private static void procureNewBasedStates(
-            LinkedList<State> basedStateLinkedList, Position p, int maxEditDistance) {
-        // LinkedList which will hold all the States based by basePosition that contain
-        // currentPosition
-        LinkedList<State> newBasedStateLinkedList = new LinkedList<>();
+    AugBitSet characteristicVector(int minimalBoundary, char letter) {
+        // Relevant subword size: min(2n+1, |s| - minimalBoundary), clamped at 0
+        int relevantSubwordSize =
+                Math.min(2 * maxEditDistance + 1, automatonStringLength - minimalBoundary);
+        if (relevantSubwordSize < 0) relevantSubwordSize = 0;
 
-        // Add a State with currentPosition as its sole member to newBasedLinkedList
-        newBasedStateLinkedList.add(new State(new Position[] {p}));
-
-        // Loop through the States in basedStateLinkedList, and for each, determine if its
-        // members Positions can form a State with currentPosition. If so, create a new State
-        // with these set of Positions as members and add it to newBasedLinkedList
-        for (State currentState : basedStateLinkedList) {
-            if (State.canBeState(currentState, p, maxEditDistance))
-                newBasedStateLinkedList.add(new State(currentState, p));
+        int memoIndex = Math.min(minimalBoundary, automatonStringLength);
+        ConcurrentHashMap<Character, AugBitSet> memo =
+                characteristicVectorMemoByBoundary[memoIndex];
+        if (memo == null) {
+            // Benign race: racing threads may create equivalent buckets; contents are
+            // deterministic so any bucket is valid
+            memo = new ConcurrentHashMap<>();
+            characteristicVectorMemoByBoundary[memoIndex] = memo;
         }
 
-        // Add all the newly created states to basedStateLinkedList
-        basedStateLinkedList.addAll(newBasedStateLinkedList);
-    }
+        AugBitSet cachedVector = memo.get(letter);
+        if (cachedVector != null) return cachedVector;
 
-    /**
-     * Procures the collection of states that are based by a position, given a maximum relevant
-     * subword size of an automaton state and the max edit distance of an automaton.
-     *
-     * @param basePosition the Position that State procurement will be based on
-     * @param maxRelevantSubwordSize an int denoting the max relevant subword size of a State in a
-     *     Levenshtein automaton (based on {@code maxEditDistance}
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by a
-     *     specific automaton
-     * @return a LinkedList of States that are based by basePosition
-     */
-    private static LinkedList<State> procureBasedStates(
-            Position basePosition, int maxRelevantSubwordSize, int maxEditDistance) {
-        // LinkedList which will hold all the States that are based by basePosition
-        LinkedList<State> basedStateLinkedList = new LinkedList<>();
-        basedStateLinkedList.add(new State(new Position[] {basePosition}));
-
-        // Loop through the set of all possible edit distances and boundaries to create
-        // Positions which will be used to creates States that are based by basePosition
-        for (int e = 1; e <= maxEditDistance; e++) {
-            for (int i = 0; i < maxRelevantSubwordSize; i++) {
-                // Create a standard position from the current processing edit distance and
-                // boundary. If it is
-                // subsumed by basePosition, use it to insert States in to basedStateLinkedList that
-                // can be formed
-                // solely by it and the set of Positions appearing as members in the elements of
-                // basedStateLinkedList
-                Position currentPosition = new Position(i, e, false);
-                if (basePosition.subsumes(currentPosition, maxEditDistance))
-                    procureNewBasedStates(basedStateLinkedList, currentPosition, maxEditDistance);
-
-                // If the t-position with the current processing edit distance and boundary is
-                // subsumed by basePosition,
-                // use it to insert States in to basedStateLinkedList in a manner identical to that
-                // used above
-                if (i <= (maxRelevantSubwordSize - 2)) {
-                    Position currentTPosition = new Position(i, e, true);
-                    if (basePosition.subsumes(currentPosition, maxEditDistance))
-                        procureNewBasedStates(
-                                basedStateLinkedList, currentTPosition, maxEditDistance);
-                }
-            }
+        AugBitSet relevantSubwordCharacteristicVector = new AugBitSet(relevantSubwordSize);
+        for (int i = 0; i < relevantSubwordSize; i++) {
+            if (automatonString.charAt(minimalBoundary + i) == letter)
+                relevantSubwordCharacteristicVector.set(i);
         }
 
-        return basedStateLinkedList;
+        AugBitSet racedVector = memo.putIfAbsent(letter, relevantSubwordCharacteristicVector);
+        return (racedVector == null ? relevantSubwordCharacteristicVector : racedVector);
     }
 
     /**
-     * Procures the collection of ParametricStates collectively representing the forms of every
-     * State in a Levenshtein automaton.
+     * Determines (in O(1)) whether a parametric state at a given minimal boundary is accepting.
      *
-     * @param maxRelevantSubwordSize an int denoting the max relevant subword size of a State in a
-     *     Levenshtein automaton (based on {@code maxEditDistance}
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by
-     *     specific automaton
-     * @return a HashSet of Parametric states collectively representing the forms of every State in
-     *     the automaton defined by maxRelevantSubwordSize and maxEditDistance
+     * <p>See {@link ParametricState#getAcceptanceThresholdOffset()} for the derivation.
+     *
+     * @param s a ParametricState
+     * @param minimalBoundary an int of the minimal boundary of the concrete State of form {@code s}
+     * @return true if a concrete State of form {@code s} with minimal boundary {@code
+     *     minimalBoundary} is accepting in this automaton; false otherwise
      */
-    private static HashSet<ParametricState> procureParametricStates(
-            int maxRelevantSubwordSize, int maxEditDistance) {
-        // HashSet which will contain ParametricState objects representing the forms of every
-        // state in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        HashSet<ParametricState> parametricStateHashSet = new HashSet<>();
-
-        // Loop through the possible relevant subword sizes, collectively using them
-        // to create the set of all possible States, and in turn, ParametricStates
-        // in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        for (int i = 0; i < maxRelevantSubwordSize; i++) {
-            // Create a base state from the current relevant subword size
-            Position basePosition = new Position(i, 0, false);
-
-            // Get the States based by basePosition
-            LinkedList<State> basedStateLinkedList =
-                    procureBasedStates(basePosition, maxRelevantSubwordSize, maxEditDistance);
-
-            // Add the parametric versions of each state in basedStateLinkedList to
-            // parametricStateHashSet
-            for (State currentNewState : basedStateLinkedList)
-                parametricStateHashSet.add(new ParametricState(currentNewState));
-        }
-
-        return parametricStateHashSet;
+    boolean isAcceptingParametricState(ParametricState s, int minimalBoundary) {
+        return (minimalBoundary
+                >= automatonStringLength - maxEditDistance + s.getAcceptanceThresholdOffset());
     }
 
     /**
-     * Produces all the binary permutations with bit counts less than or equal to a given value.
+     * Searches a collection of Strings for those which are within this automaton's max edit
+     * distance of its reference String, using the mode this instance was compiled with
+     * (table-lookup walk for table-based instances, on-the-fly simulation otherwise).
      *
-     * @param maxBitCount an int denoting the maximum bit count of a permutation to be produced
-     * @return an ArrayList of AugBitSets that collectively represent the set of binary permutations
-     *     of bit counts from 0 to {@code maxBitCount}
+     * @param mdag an MDAG containing the set of Strings to be processed against this automaton's
+     *     reference String
+     * @return a LinkedList containing all the Strings in {@code mdag} that are within this
+     *     automaton's max edit distance of its reference String
      */
-    private static ArrayList<AugBitSet> produceBinaryPermutations(int maxBitCount) {
-        // Determine the total number of permutations to be produced
-        int totalPermutationCount = 0;
-        for (int i = 1; i < maxBitCount + 1; i++) totalPermutationCount += Math.pow(2, i);
-
-        // ArrayList of AugBitSets which will each represent a binary permutation. "+1" accomodates
-        // the empty permutation
-        ArrayList<AugBitSet> binaryPermutationContainerArrayList =
-                new ArrayList<>(totalPermutationCount + 1);
-
-        // Add the AugBitSet representstions of the permutations {0} and {1} to
-        // binaryPermutationContainerArrayList
-        for (int i = 0; i <= 1; i++) {
-            binaryPermutationContainerArrayList.add(new AugBitSet(1));
-            binaryPermutationContainerArrayList
-                    .get(binaryPermutationContainerArrayList.size() - 1)
-                    .set(0, (i != 0));
-        }
-
-        // Loop through the AugBitSets in binaryPermutationContainerArrayList, using each to create
-        // new permutations (by separately adding a and 1 to the end of each) that are added to the
-        // end of
-        // the ArrayList. This is done until one is encountered that has a size equal to
-        // maxRelevantSubwordSize
-        for (int i = 0;
-                binaryPermutationContainerArrayList.get(i).getRelevantBitSetSize() < maxBitCount;
-                i++) {
-            // Loop through the set [0,1], using each value to create a new binary permutation
-            // by appending the value to the end of a copy of the permutation located at i
-            for (int j = 0; j <= 1; j++) {
-                AugBitSet currentPermutationBitSet = binaryPermutationContainerArrayList.get(i);
-                AugBitSet newPermutationBitSet =
-                        new AugBitSet(currentPermutationBitSet.getRelevantBitSetSize() + 1);
-
-                newPermutationBitSet.xor(currentPermutationBitSet); // copies the relevant bits in
-                // currentPermutationBitSet
-                newPermutationBitSet.set(
-                        newPermutationBitSet.getRelevantBitSetSize() - 1, (j != 0));
-
-                binaryPermutationContainerArrayList.add(newPermutationBitSet);
-            }
-        }
-
-        binaryPermutationContainerArrayList.add(
-                new AugBitSet(0)); // Add the empty permutation as well
-        return binaryPermutationContainerArrayList;
+    public LinkedList<String> fuzzySearch(MDAG mdag) {
+        return (parametricAutomaton != null ? tableFuzzySearch(mdag) : iterativeFuzzySearch(mdag));
     }
 
     /**
-     * Creates a Map containing the transition relationships between the parameterized versions of
-     * States in an automaton defined by a given max edit distance.
+     * Searches a collection of Strings for those which are within this automaton's max edit
+     * distance of its reference String, traversing the MDAG in-sync with a table-lookup walk of the
+     * parametric automaton.
      *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by
-     *     specific automaton
-     */
-    private static void createParametricStateTransitionMap(int maxEditDistance) {
-        if (!transitionHashMapContainerHashMap.containsKey(
-                maxEditDistance)) // if the transition map for maxEditDistance does not yet exist
-        {
-            // HashMap which will store the transition relationships between the parametrized
-            // versions of States in the automaton described by maxEditDistance
-            HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap =
-                    new HashMap<>();
-
-            int maxRelevantSubwordSize = 2 * maxEditDistance + 1;
-
-            // Procure the set of ParametricStates collectively describing the forms of all the
-            // States in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-            HashSet<ParametricState> parametricStateHashSet =
-                    procureParametricStates(maxRelevantSubwordSize, maxEditDistance);
-
-            // Produce all the possible characteristic vectors of sizes 0 to maxEditDistance
-            ArrayList<AugBitSet> characteristicVectorPermutationContainerArrayList =
-                    produceBinaryPermutations(maxRelevantSubwordSize);
-
-            // Loop through possible characteristic vectors and ParametricStates, using them to
-            // create transition relationships that will be represented and stored in
-            // transitionHashMap
-            for (AugBitSet characteristicVector :
-                    characteristicVectorPermutationContainerArrayList) {
-                for (ParametricState currentParametricState : parametricStateHashSet) {
-                    // If States of the form described by currentParametricState have Position
-                    // sets that can fit in a relevant subword of the form descirbed by
-                    // characteristicVector
-                    if (currentParametricState.getLargestPositionOffset()
-                            <= characteristicVector.getRelevantBitSetSize()) {
-                        // Use currentParametricState to create a dummy state with a minimum
-                        // boundary of zero
-                        State currentConcreteState = currentParametricState.createActualState(0);
-
-                        // Execute a transiton on currentConcreteState given maxEditDistance and
-                        // characteristicVector
-                        State transitionState =
-                                currentConcreteState.transition(
-                                        maxEditDistance, characteristicVector);
-
-                        ParametricState transitionParametricState = null;
-
-                        // If the transition yields a non-failure State, get the result State's
-                        // ParametricState
-                        if (transitionState != null) {
-                            int minimumBoundariesDifference =
-                                    State.getMinimumBoundariesDifference(
-                                            currentConcreteState, transitionState);
-                            transitionParametricState =
-                                    new ParametricState(
-                                            transitionState, minimumBoundariesDifference);
-                        }
-
-                        // Store the transition relationship between currentParametricState,
-                        // characteristicVector, and transitionParametricState in transitionHashMap
-                        if (!transitionHashMap.containsKey(currentParametricState))
-                            transitionHashMap.put(currentParametricState, new HashMap<>());
-
-                        transitionHashMap
-                                .get(currentParametricState)
-                                .put(characteristicVector, transitionParametricState);
-                    }
-                }
-            }
-
-            transitionHashMapContainerHashMap.put(maxEditDistance, transitionHashMap);
-        }
-    }
-
-    /**
-     * Creates an array of objects collectively representing a processing step in an automaton-based
-     * fuzzy search.
+     * <p>Requires a table-based instance (see {@link #compile(String, int)}).
      *
-     * @param transitionPathString the sequence of characters used to for transition to the
-     *     to-be-saved processing step
-     * @param mdagTransitionPathEndNode the MDAGNode of interest in the to-be-saved processing step
-     * @param lAutomatonTransitionPathEndState the State of interest in the to-be-saved processing
-     *     step
-     * @return an array containing {@code transitionPathString}, {@code mdagTransitionPathEndNode},
-     *     and {@code lAutomatonTransitionPathEndState}
+     * @param mdag an MDAG containing the set of Strings to be processed against this automaton's
+     *     reference String
+     * @return a LinkedList containing all the Strings in {@code mdag} that are within this
+     *     automaton's max edit distance of its reference String
      */
-    private static Object[] createProcessingStepStackEntry(
-            String transitionPathString,
-            Object mdagTransitionPathEndNode,
-            State lAutomatonTransitionPathEndState) {
-        Object[] processingStepDataArray = new Object[3];
-        processingStepDataArray[0] = transitionPathString;
-        processingStepDataArray[1] = mdagTransitionPathEndNode;
-        processingStepDataArray[2] = lAutomatonTransitionPathEndState;
+    public LinkedList<String> tableFuzzySearch(MDAG mdag) {
+        if (parametricAutomaton == null)
+            throw new IllegalStateException(
+                    "tableFuzzySearch requires a table-based instance; use compile(String, int)");
 
-        return processingStepDataArray;
-    }
-
-    /**
-     * Creates an array of objects collectively representing a processing step in a tabled-based
-     * fuzzy search.
-     *
-     * @param transitionPathString the sequence of characters used to for transition to the
-     *     to-be-saved processing step
-     * @param mdagTransitionPathEndNode the MDAGNode of interest in the to-be-saved processing step
-     * @param lAutomatonTransitionPathEndState the State of interest in the to-be-saved processing
-     *     step
-     * @param lAutomatonTransitionPathEndParametricState the ParametricState of interest in the
-     *     to-be-saved processing step
-     * @return an array containing {@code transitionPathString}, {@code mdagTransitionPathEndNode},
-     *     and {@code lAutomatonTransitionPathEndState}
-     */
-    private static Object[] createProcessingStepStackEntry(
-            String transitionPathString,
-            Object mdagTransitionPathEndNode,
-            State lAutomatonTransitionPathEndState,
-            ParametricState lAutomatonTransitionPathEndParametricState) {
-        Object[] processingStepDataArray = new Object[4];
-        processingStepDataArray[0] = transitionPathString;
-        processingStepDataArray[1] = mdagTransitionPathEndNode;
-        processingStepDataArray[2] = lAutomatonTransitionPathEndState;
-        processingStepDataArray[3] = lAutomatonTransitionPathEndParametricState;
-
-        return processingStepDataArray;
-    }
-
-    /**
-     * Searches a collection of Strings for those which are within a given edit distance from a
-     * particular string. This version of fuzzy search traverses through the States of a Levenshtein
-     * automata, and will be the slowest of all the fuzzy search methods in most use cases
-     *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations that can
-     *     separate a String in the to-be-searched collection with the String of interest
-     * @param automatonString the String that all edit-distance calculations are to be carried out
-     *     in relation to
-     * @param mdag an MDAG containing the set of Strings to be processed against {@code
-     *     automatonString}
-     * @return a LinkedList containing all the Strings in {@code mdag} that are at most {@code
-     *     maxEditDistance} away from {@code automatonString}
-     */
-    public static LinkedList<String> iterativeFuzzySearch(
-            int maxEditDistance, String automatonString, MDAG mdag) {
         // LinkedList which will contain Strings in mdag that are within maxEditDistance of
         // automatonString
         LinkedList<String> resultStringLinkedList = new LinkedList<>();
 
-        // Stack to store collections of objects which collectively represent steps in the search
-        // process
-        Stack<Object[]> processingStepStack = new Stack<>();
-
-        boolean mdagIsSimplified = mdag.getSourceNode().getClass().equals(SimpleMDAGNode.class);
-        SimpleMDAGNode[] simpleMDAGArray = mdag.getSimpleMDAGArray();
-
-        // Push onto processingStepStack collection of objects which represent the start step of the
-        // search process
-        processingStepStack.push(
-                createProcessingStepStackEntry("", mdag.getSourceNode(), initialState));
-
-        // Retrieve the set of characters composing the Strings in mdag
-        TreeSet<Character> charTreeSet = mdag.getTransitionLabelSet();
-        int charCount = charTreeSet.size();
-
-        // Iterate through charTreeSet, inserting each char in to charArray
-        int counter = 0;
-        char[] charArray = new char[charCount];
-        for (Character c : charTreeSet) charArray[counter++] = c;
-
-        // Transition through the MDAG and automaton in-sync, adding to resultStringLinkedList
-        // the char sequences that lead to both an accept node (MDAG) and accept state (automaton)
-        while (!processingStepStack.isEmpty()) {
-            // Pop the processing step at the top of the stack and re-cast its contents
-            Object[] currentProcessingStepDataArray = processingStepStack.pop();
-
-            Object currentNodeObj = currentProcessingStepDataArray[1];
-            State currentState = (State) currentProcessingStepDataArray[2];
-
-            // Loop through the chars in charArray, using each to transition the node & state in the
-            // processing step at the top of the stack. If both the node and state have valid
-            // transitions on a particular char, push the resulting transition String, node,
-            // and State on the top of the stack
-            for (int i = 0; i < charCount; i++) {
-                char currentChar = charArray[i];
-
-                // Execute a transition on the current MDAG node using currentChar
-                Object transitionNode =
-                        (mdagIsSimplified
-                                ? ((SimpleMDAGNode) currentNodeObj)
-                                        .transition(simpleMDAGArray, currentChar)
-                                : ((MDAGNode) currentNodeObj).transition(currentChar));
-
-                if (transitionNode != null) {
-                    // Execute a transition on the current automaton State using currentChar
-                    State transitionState =
-                            currentState.transition(maxEditDistance, automatonString, currentChar);
-
-                    if (transitionState != null) {
-                        // Push the resulting processing step on to the top of processingStepStack
-                        String transitionPathString =
-                                (String) currentProcessingStepDataArray[0] + currentChar;
-                        processingStepStack.push(
-                                createProcessingStepStackEntry(
-                                        transitionPathString, transitionNode, transitionState));
-
-                        // If both transitionNode and transitionState are "accepting", add the
-                        // sequence of chars that lead to them to resultStringLinkedList
-                        if (MDAG.isAcceptNode(transitionNode)
-                                && isAcceptState(
-                                        transitionState, automatonString.length(), maxEditDistance))
-                            resultStringLinkedList.add(transitionPathString);
-                    }
-                }
-            }
-            /////
-        }
-
-        return resultStringLinkedList;
-    }
-
-    /**
-     * Searches a collection of Strings for those which are within a given edit distance from a
-     * particular String.
-     *
-     * <p>This version of fuzzy search uses a pre-computed map of transitions, and is the fastest
-     * method for max edit distances less than or equal 2. Greater max edit distances require huge
-     * amounts of memory and are not guaranteed to be faster than a non-automaton approach, so use
-     * in those cases is discouraged.
-     *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations that can
-     *     separate a String in the to-be-searched collection with the String of interest
-     * @param automatonString the String that all edit-distance calculations are to be carried out
-     *     in relation to
-     * @param mdag an MDAG containing the set of Strings to be processed against {@code
-     *     automatonString}
-     * @return a LinkedList containing all the Strings in {@code mdag} that are at most {@code
-     *     maxEditDistance} away from {@code automatonString}
-     */
-    public static LinkedList<String> tableFuzzySearch(
-            int maxEditDistance, String automatonString, MDAG mdag) {
-        // LinkedList which will contain Strings in mdag that are within maxEditDistance of
-        // automatonString
-        LinkedList<String> resultStringLinkedList = new LinkedList<>();
-
-        // HashMap containing the transition relationships between the parametric states of an
-        // automaton with maxEditDistance
-        createParametricStateTransitionMap(maxEditDistance);
-        HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap =
-                transitionHashMapContainerHashMap.get(maxEditDistance);
-
-        // Stack to store collections of objects which collectively represent steps in the search
-        // process
-        Stack<Object[]> processingStepStack = new Stack<>();
+        // Stack to store processing steps of the search process
+        Stack<TableProcessingStep> processingStepStack = new Stack<>();
 
         boolean mdagIsSimplified = mdag.getSourceNode().getClass().equals(SimpleMDAGNode.class);
         SimpleMDAGNode[] simpleMDAGArray = mdag.getSimpleMDAGArray();
@@ -501,30 +350,110 @@ public class LevenshteinAutomaton {
         // Push onto processingStepStack the collection of objects which represent the start step of
         // the search process
         processingStepStack.push(
-                createProcessingStepStackEntry(
-                        "", mdag.getSourceNode(), initialState, new ParametricState(initialState)));
+                new TableProcessingStep(
+                        "", mdag.getSourceNode(), parametricAutomaton.getInitialState(), 0));
 
-        // Retrieve the set of characters composing the Strings in mdag
-        TreeSet<Character> charTreeSet = mdag.getTransitionLabelSet();
-        int charCount = charTreeSet.size();
+        char[] charArray = procureTransitionLabelArray(mdag);
+        int charCount = charArray.length;
 
-        // Iterate through charTreeSet, inserting each char in to charArray
-        int counter = 0;
-        char[] charArray = new char[charCount];
-        for (Character c : charTreeSet) charArray[counter++] = c;
-
-        // Transition through the MDAG and the automaton represented by transitionHashMap in-sync,
-        // adding to
-        // resultStringLinkedList the char sequences that lead to both an accept node (MDAG) and
-        // accept state (transition map)
+        // Transition through the MDAG and the automaton represented by the parametric transition
+        // table in-sync, adding to resultStringLinkedList the char sequences that lead to both an
+        // accept node (MDAG) and accepting state (automaton)
         while (!processingStepStack.isEmpty()) {
-            // Pop the processing step at the top of the stack and re-cast its contents
-            Object[] currentProcessingStepDataArray = processingStepStack.pop();
+            TableProcessingStep currentProcessingStep = processingStepStack.pop();
 
-            Object currentNodeObj = currentProcessingStepDataArray[1];
-            State currentState = (State) currentProcessingStepDataArray[2];
+            Object currentNodeObj = currentProcessingStep.mdagTransitionPathEndNode;
             ParametricState currentParametricState =
-                    (ParametricState) currentProcessingStepDataArray[3];
+                    currentProcessingStep.lAutomatonTransitionPathEndParametricState;
+            int currentMinimalBoundary =
+                    currentProcessingStep.lAutomatonTransitionPathEndMinimalBoundary;
+
+            // Loop through the chars in charArray, using each to transition the node & state in the
+            // processing step at the top of the stack. If both the node and state have valid
+            // transitions on a particular char, push the resulting transition String, node,
+            // and state on the top of the stack
+            for (int i = 0; i < charCount; i++) {
+                char currentChar = charArray[i];
+
+                // Execute a transition on the current MDAG node using currentChar
+                Object transitionNode =
+                        (mdagIsSimplified
+                                ? ((SimpleMDAGNode) currentNodeObj)
+                                        .transition(simpleMDAGArray, currentChar)
+                                : ((MDAGNode) currentNodeObj).transition(currentChar));
+
+                if (transitionNode != null) {
+                    // Get the characteristic vector of the current step's relevant subword (with
+                    // respect to currentChar) and use it to look up the transition's result state
+                    AugBitSet rscv = characteristicVector(currentMinimalBoundary, currentChar);
+                    ParametricState transitionParametricState =
+                            parametricAutomaton.transition(currentParametricState, rscv);
+
+                    if (transitionParametricState != null) {
+                        int transitionMinimalBoundary =
+                                currentMinimalBoundary
+                                        + transitionParametricState.getTransitionBoundaryOffset();
+                        String transitionPathString =
+                                currentProcessingStep.transitionPathString + currentChar;
+
+                        // Push the resulting processing step on to the top of processingStepStack
+                        processingStepStack.push(
+                                new TableProcessingStep(
+                                        transitionPathString,
+                                        transitionNode,
+                                        transitionParametricState,
+                                        transitionMinimalBoundary));
+
+                        // If both transitionNode and the automaton state are "accepting", add the
+                        // sequence of chars that lead to them to resultStringLinkedList
+                        if (MDAG.isAcceptNode(transitionNode)
+                                && isAcceptingParametricState(
+                                        transitionParametricState, transitionMinimalBoundary))
+                            resultStringLinkedList.add(transitionPathString);
+                    }
+                }
+            }
+        }
+
+        return resultStringLinkedList;
+    }
+
+    /**
+     * Searches a collection of Strings for those which are within this automaton's max edit
+     * distance of its reference String, traversing the MDAG in-sync with an on-the-fly simulation
+     * of the automaton's States.
+     *
+     * @param mdag an MDAG containing the set of Strings to be processed against this automaton's
+     *     reference String
+     * @return a LinkedList containing all the Strings in {@code mdag} that are within this
+     *     automaton's max edit distance of its reference String
+     */
+    public LinkedList<String> iterativeFuzzySearch(MDAG mdag) {
+        // LinkedList which will contain Strings in mdag that are within maxEditDistance of
+        // automatonString
+        LinkedList<String> resultStringLinkedList = new LinkedList<>();
+
+        // Stack to store processing steps of the search process
+        Stack<IterativeProcessingStep> processingStepStack = new Stack<>();
+
+        boolean mdagIsSimplified = mdag.getSourceNode().getClass().equals(SimpleMDAGNode.class);
+        SimpleMDAGNode[] simpleMDAGArray = mdag.getSimpleMDAGArray();
+
+        // Push onto processingStepStack collection of objects which represent the start step of the
+        // search process
+        processingStepStack.push(
+                new IterativeProcessingStep("", mdag.getSourceNode(), initialState));
+
+        char[] charArray = procureTransitionLabelArray(mdag);
+        int charCount = charArray.length;
+
+        // Transition through the MDAG and automaton in-sync, adding to resultStringLinkedList
+        // the char sequences that lead to both an accept node (MDAG) and accept state (automaton)
+        while (!processingStepStack.isEmpty()) {
+            IterativeProcessingStep currentProcessingStep = processingStepStack.pop();
+
+            Object currentNodeObj = currentProcessingStep.mdagTransitionPathEndNode;
+            State currentState = currentProcessingStep.lAutomatonTransitionPathEndState;
 
             // Loop through the chars in charArray, using each to transition the node & state in the
             // processing step at the top of the stack. If both the node and state have valid
@@ -541,39 +470,27 @@ public class LevenshteinAutomaton {
                                 : ((MDAGNode) currentNodeObj).transition(currentChar));
 
                 if (transitionNode != null) {
-                    // Get currentState's relevant subword (with respect to currentChar) and
-                    // use it to get the parametric version of the transition's result State
-                    AugBitSet rscv =
-                            currentState.getRelevantSubwordCharacteristicVector(
-                                    maxEditDistance, automatonString, currentChar);
-                    ParametricState transitionParametricState =
-                            transitionHashMap.get(currentParametricState).get(rscv);
+                    // Execute a transition on the current automaton State using currentChar (via
+                    // the memoized characteristic vector of its relevant subword)
+                    State transitionState =
+                            currentState.transition(
+                                    maxEditDistance,
+                                    characteristicVector(
+                                            currentState.getMinimalBoundary(), currentChar));
 
-                    if (transitionParametricState != null) {
-                        // Use transitionParametricState to create the actual State that is the
-                        // result of the transition
-                        State transitionState =
-                                transitionParametricState.createActualState(
-                                        currentState.getMinimalBoundary()
-                                                + transitionParametricState
-                                                        .getTransitionBoundaryOffset());
-
-                        String transitionPathString =
-                                (String) currentProcessingStepDataArray[0] + currentChar;
-
+                    if (transitionState != null) {
                         // Push the resulting processing step on to the top of processingStepStack
+                        String transitionPathString =
+                                currentProcessingStep.transitionPathString + currentChar;
                         processingStepStack.push(
-                                createProcessingStepStackEntry(
-                                        transitionPathString,
-                                        transitionNode,
-                                        transitionState,
-                                        transitionParametricState));
+                                new IterativeProcessingStep(
+                                        transitionPathString, transitionNode, transitionState));
 
                         // If both transitionNode and transitionState are "accepting", add the
                         // sequence of chars that lead to them to resultStringLinkedList
                         if (MDAG.isAcceptNode(transitionNode)
                                 && isAcceptState(
-                                        transitionState, automatonString.length(), maxEditDistance))
+                                        transitionState, automatonStringLength, maxEditDistance))
                             resultStringLinkedList.add(transitionPathString);
                     }
                 }
@@ -581,6 +498,152 @@ public class LevenshteinAutomaton {
         }
 
         return resultStringLinkedList;
+    }
+
+    /**
+     * Retrieves the sorted array of characters labeling the transitions of the Strings in an MDAG.
+     *
+     * @param mdag an MDAG
+     * @return a char array of the characters composing the Strings in {@code mdag}
+     */
+    private static char[] procureTransitionLabelArray(MDAG mdag) {
+        TreeSet<Character> charTreeSet = mdag.getTransitionLabelSet();
+        int charCount = charTreeSet.size();
+
+        char[] charArray = new char[charCount];
+        int counter = 0;
+        for (Character c : charTreeSet) charArray[counter++] = c;
+
+        return charArray;
+    }
+
+    /**
+     * An immutable group of objects collectively representing a processing step in a table-based
+     * fuzzy search (replacing the former untyped Object[] stack entries).
+     */
+    private static final class TableProcessingStep {
+        // The sequence of chars used to transition to this step
+        final String transitionPathString;
+
+        // The MDAG node of interest in this step
+        final Object mdagTransitionPathEndNode;
+
+        // The parametric state of the automaton in this step
+        final ParametricState lAutomatonTransitionPathEndParametricState;
+
+        // The minimal boundary of the automaton's concrete State in this step
+        final int lAutomatonTransitionPathEndMinimalBoundary;
+
+        TableProcessingStep(
+                String transitionPathString,
+                Object mdagTransitionPathEndNode,
+                ParametricState lAutomatonTransitionPathEndParametricState,
+                int lAutomatonTransitionPathEndMinimalBoundary) {
+            this.transitionPathString = transitionPathString;
+            this.mdagTransitionPathEndNode = mdagTransitionPathEndNode;
+            this.lAutomatonTransitionPathEndParametricState =
+                    lAutomatonTransitionPathEndParametricState;
+            this.lAutomatonTransitionPathEndMinimalBoundary =
+                    lAutomatonTransitionPathEndMinimalBoundary;
+        }
+    }
+
+    /**
+     * An immutable group of objects collectively representing a processing step in an
+     * iterative-fuzzy-search (replacing the former untyped Object[] stack entries).
+     */
+    private static final class IterativeProcessingStep {
+        // The sequence of chars used to transition to this step
+        final String transitionPathString;
+
+        // The MDAG node of interest in this step
+        final Object mdagTransitionPathEndNode;
+
+        // The automaton State of interest in this step
+        final State lAutomatonTransitionPathEndState;
+
+        IterativeProcessingStep(
+                String transitionPathString,
+                Object mdagTransitionPathEndNode,
+                State lAutomatonTransitionPathEndState) {
+            this.transitionPathString = transitionPathString;
+            this.mdagTransitionPathEndNode = mdagTransitionPathEndNode;
+            this.lAutomatonTransitionPathEndState = lAutomatonTransitionPathEndState;
+        }
+    }
+
+    /**
+     * Determines if two Strings are within a specified edit distance of one another.
+     *
+     * <p>This static convenience entry point compiles a table-based automaton per call; it is kept
+     * for backward compatibility. To actually benefit from the automaton's reusability (and avoid
+     * rebuilding per query), compile once and reuse the instance:
+     *
+     * <pre>{@code
+     * LevenshteinAutomaton automaton = LevenshteinAutomaton.compile(str1, maxEditDistance);
+     * automaton.isWithinEditDistance(str2);
+     * }</pre>
+     *
+     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed to be
+     *     used to (hypothetically) turn one String in to another
+     * @param str1 a String
+     * @param str2 a String
+     * @return true if {@code str1} and {@code str2} are within {@code maxEditDistance} edit
+     *     operations of each other; false otherwise
+     * @deprecated use {@link #compile(String, int)} and reuse the resulting instance's {@link
+     *     #isWithinEditDistance(String)}
+     */
+    @Deprecated
+    public static boolean isWithinEditDistance(int maxEditDistance, String str1, String str2) {
+        return compile(str1, maxEditDistance).accepts(str2);
+    }
+
+    /**
+     * Searches a collection of Strings for those which are within a given edit distance from a
+     * particular String, using the parametric transition table.
+     *
+     * <p>This static convenience entry point is kept for backward compatibility; compile once and
+     * reuse the instance to avoid rebuilding per query.
+     *
+     * @param maxEditDistance an int denoting the maximum amount of edit operations that can
+     *     separate a String in the to-be-searched collection with the String of interest
+     * @param automatonString the String that all edit-distance calculations are to be carried out
+     *     in relation to
+     * @param mdag an MDAG containing the set of Strings to be processed against {@code
+     *     automatonString}
+     * @return a LinkedList containing all the Strings in {@code mdag} that are at most {@code
+     *     maxEditDistance} away from {@code automatonString}
+     * @deprecated use {@link #compile(String, int)} and reuse the resulting instance's {@link
+     *     #tableFuzzySearch(MDAG)}
+     */
+    @Deprecated
+    public static LinkedList<String> tableFuzzySearch(
+            int maxEditDistance, String automatonString, MDAG mdag) {
+        return compile(automatonString, maxEditDistance).tableFuzzySearch(mdag);
+    }
+
+    /**
+     * Searches a collection of Strings for those which are within a given edit distance from a
+     * particular String, simulating the automaton's States on the fly.
+     *
+     * <p>This static convenience entry point is kept for backward compatibility; compile once and
+     * reuse the instance to avoid rebuilding per query.
+     *
+     * @param maxEditDistance an int denoting the maximum amount of edit operations that can
+     *     separate a String in the to-be-searched collection with the String of interest
+     * @param automatonString the String that all edit-distance calculations are to be carried out
+     *     in relation to
+     * @param mdag an MDAG containing the set of Strings to be processed against {@code
+     *     automatonString}
+     * @return a LinkedList containing all the Strings in {@code mdag} that are at most {@code
+     *     maxEditDistance} away from {@code automatonString}
+     * @deprecated use {@link #compileIterative(String, int)} and reuse the resulting instance's
+     *     {@link #iterativeFuzzySearch(MDAG)}
+     */
+    @Deprecated
+    public static LinkedList<String> iterativeFuzzySearch(
+            int maxEditDistance, String automatonString, MDAG mdag) {
+        return compileIterative(automatonString, maxEditDistance).iterativeFuzzySearch(mdag);
     }
 
     /**

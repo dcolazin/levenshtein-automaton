@@ -48,6 +48,11 @@ public class ParametricState {
     // the transitioning state as well as the characterisitc vector of its relevant subword.
     private int transitionBoundaryOffset = 0;
 
+    // Int denoting min(e_j - offset_j) over the member positions of a State of this form. A
+    // concrete State of this form with minimal boundary minB is accepting with respect to a string
+    // of length L and a max edit distance n iff minB >= L - n + acceptanceThresholdOffset.
+    private final int acceptanceThresholdOffset;
+
     /**
      * Constructs a ParametricState from a concrete State.
      *
@@ -65,12 +70,20 @@ public class ParametricState {
         // order),
         // inserting the relative (from the minimal boundary) boundaries and absolute edit distance
         // and T values in to the corresponding indices of the relevant arrays
+        int minimumEditMinusOffset = Integer.MAX_VALUE;
         for (int i = 0; i < memberPositionCount; i++) {
             memberPositionBoundaryOffsetArray[i] =
                     stateMemberPositionArray[i].getI() - stateMemberPositionArray[0].getI();
             memberPositionEArray[i] = stateMemberPositionArray[i].getE();
             memberPositionTArray[i] = stateMemberPositionArray[i].getT();
+
+            minimumEditMinusOffset =
+                    Math.min(
+                            minimumEditMinusOffset,
+                            memberPositionEArray[i] - memberPositionBoundaryOffsetArray[i]);
         }
+
+        acceptanceThresholdOffset = minimumEditMinusOffset;
     }
 
     /**
@@ -103,6 +116,24 @@ public class ParametricState {
      */
     public int getTransitionBoundaryOffset() {
         return transitionBoundaryOffset;
+    }
+
+    /**
+     * Returns the acceptance threshold offset of this ParametricState.
+     *
+     * <p>A concrete State of this form with minimal boundary {@code minB} is accepting with respect
+     * to a reference string of length {@code L} and max edit distance {@code n} iff {@code minB >=
+     * L - n + getAcceptanceThresholdOffset()}.
+     *
+     * <p>This is derived from the per-position acceptance rule (position j with boundary {@code
+     * minB + offset_j} and edit count {@code e_j} is accepting iff {@code L - (minB + offset_j) <=
+     * n - e_j}): the state is accepting iff some member position is, i.e. iff {@code minB >= L - n
+     * + min_j(e_j - offset_j)}.
+     *
+     * @return an int of min(e_j - offset_j) over the member positions of a State of this form
+     */
+    public int getAcceptanceThresholdOffset() {
+        return acceptanceThresholdOffset;
     }
 
     /**
