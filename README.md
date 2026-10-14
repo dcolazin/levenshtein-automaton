@@ -34,11 +34,14 @@ LinkedList<String> neighbors = automaton.fuzzySearch(mdag);
 
 Two compilation modes are available:
 
-- `LevenshteinAutomaton.compile(s, n)` — table-based. Transitions resolve through the parametric
-  transition table of `ParametricAutomaton`, which is built once per max edit distance and shared
-  process-wide. Recommended for `n <= 2`; greater distances require huge amounts of memory.
+- `LevenshteinAutomaton.compile(s, n)` — memo-based. Transitions resolve through the parametric
+  transition table of `ParametricAutomaton`, shared process-wide per distance and materialized
+  lazily: construction is O(1) and memory grows only with the (state, characteristic-vector) pairs
+  actually used by queries. This scales to large max edit distances (up to
+  `ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE = 28`, beyond which compilation transparently
+  falls back to simulation).
 - `LevenshteinAutomaton.compileIterative(s, n)` — table-free. Transitions are computed on the fly
-  (characteristic vectors are still memoized per instance). Advised for larger max edit distances.
+  with no shared memo growth at all. Useful when even memoized state growth is undesired.
 
 The pre-refactor static entry points (`LevenshteinAutomaton.isWithinEditDistance`,
 `tableFuzzySearch`, `iterativeFuzzySearch`) are deprecated delegators kept for backward

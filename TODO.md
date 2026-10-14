@@ -71,7 +71,37 @@ follow-ups (non-blocking).
 
 ## Phase 5 — Optional follow-ups (non-blocking)
 
-- [ ] `precompute()` / eager DFA materialization if profiling demands
-- [ ] deliberate fix + regression test for the t-position subsumption quirk in
-      `procureBasedStates` (currently pinned as-is by characterization tests)
+- [x] ~~deliberate fix + regression test for the t-position subsumption quirk in
+      `procureBasedStates`~~ — resolved by Phase 6: the eager enumeration containing the quirk was
+      deleted; states are now discovered on demand, never enumerated
+- [ ] `precompute()` / eager materialization warm-up if profiling demands (post-Phase 6 the lazy
+      memo fills during the first queries, so a warm-up is rarely needed)
 - [ ] drop deprecated static facades in a future major version
+
+## Phase 6 — Scalable data structures for large max edit distances
+
+Motivation: table-mode construction eagerly materialized `states × 2^(2n+1)` vectors as nested
+`HashMap`s of `AugBitSet` keys (~130 KB per state at `n = 4`) — distances beyond 2 were
+unbuildable and the committed benchmark could not even run. See `PLAN.md` section 7 for the
+design.
+
+- [x] `ParametricAutomaton`: rewritten as a lazily materialized transition memo — state forms
+      interned to dense int ids; transitions computed on demand from the existing
+      `State`/`Position` machinery and memoized compactly; failure transitions memoized
+      (sentinel); construction O(1); eager enumeration (and its t-position subsumption quirk)
+      deleted; `MAX_SUPPORTED_EDIT_DISTANCE = 28` (vector packing limit)
+- [x] Characteristic vectors packed into primitive longs (`bits << 6 | size`), replacing
+      `AugBitSet` keys and per-step allocations
+- [x] Per-state copy-on-write sorted `long[]` transition snapshots (16 bytes/entry, lock-free
+      reads) replacing nested `HashMap`s; transition values pack
+      `(targetStateId << 7) | boundaryOffset`
+- [x] `LevenshteinAutomaton`: per-character occurrence bitmasks → O(1) zero-allocation vector
+      lookup (replaces the per-(boundary, char) `ConcurrentHashMap` memo); memo walk on interned
+      state ids; automatic simulation fallback for `n > 28`
+- [x] Tests: memo-mode exhaustive coverage extended to distance 3 (binary/ternary) plus
+      big-distance exhaustive/targeted tests at distances 4/5/6 and fallback checks;
+      packed-vector parity vs `State.getRelevantSubwordCharacteristicVector`;
+      acceptance-formula test drives lazy discovery first
+- [x] Bench: distance-4 and distance-8 reuse scenarios run out of the box (construction is
+      instant); `Main` demo includes distance 8
+- [x] README/PLAN/TODO updated; full `mvn test` green

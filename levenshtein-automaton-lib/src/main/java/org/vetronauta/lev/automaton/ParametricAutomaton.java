@@ -20,61 +20,103 @@
 package org.vetronauta.lev.automaton;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A string-independent (parametric) Levenshtein automaton for a fixed maximum edit distance.
  *
- * <p>Per the parametric construction of Levenshtein automata, the transition structure of the
+ * <p>Per the parametric construction of Levenshtein automata, the transition function of the
  * automaton recognizing {@code lev(s, ·) <= n} does not depend on the reference string {@code s}
  * itself, but only on the characteristic vectors (of length at most {@code 2n+1}) of the consumed
  * character relative to the current window of {@code s}. Consequently a single ParametricAutomaton
- * per edit distance {@code n} can be built once and shared by every {@link LevenshteinAutomaton}
- * compiled for that distance.
+ * per edit distance {@code n} can serve every {@link LevenshteinAutomaton} compiled for that
+ * distance.
  *
- * <p>Instances are immutable and thread-safe. One instance per distance is kept in a process-wide
- * cache managed by {@link #forDistance(int)}; {@link #clearCache()} drops it.
+ * <p><b>Scalable, lazily-materialized transition table.</b> Instead of eagerly materializing the
+ * full cross product of parametric states and characteristic vectors (whose memory grows roughly
+ * with {@code states(n) × 2^(2n+1)} and makes distances greater than 2 practically unbuildable),
+ * transitions are computed on demand from the underlying {@link State}/{@link Position} machinery
+ * and memoized compactly:
  *
- * <p>Note: the transition table grows roughly with the number of parametric states times {@code
- * 2^(2n+1)} characteristic vectors, which is why table-based automata are recommended for max edit
- * distances of at most 2. Use {@link LevenshteinAutomaton#compileIterative(String, int)} to avoid
- * the table entirely for larger distances.
+ * <ul>
+ *   <li>characteristic vectors are packed into primitive {@code long}s ({@code bits << 6 | size}),
+ *       not {@link AugBitSet} objects;
+ *   <li>parametric states are interned to {@code int} ids (a form registry);
+ *   <li>each state's memoized transitions live in immutable, copy-on-write sorted arrays (16 bytes
+ *       per entry, allocation-free and lock-free reads);
+ *   <li>failure transitions are memoized too (sentinel value), so repeated dead-ends stay cheap.
+ * </ul>
+ *
+ * <p>Construction is O(1); memory grows proportionally to the (state, vector) pairs actually used
+ * by queries. Note that the eager state enumeration of the former implementation — including its
+ * t-position subsumption quirk — is gone entirely: states are discovered, never enumerated.
+ *
+ * <p>Instances are thread-safe. One instance per distance is kept in a process-wide cache managed
+ * by {@link #forDistance(int)}; {@link #clearCache()} drops it. Vector packing supports max edit
+ * distances up to {@link #MAX_SUPPORTED_EDIT_DISTANCE}; {@link LevenshteinAutomaton#compile(String,
+ * int)} transparently falls back to table-free simulation beyond that (see {@link
+ * LevenshteinAutomaton#compileIterative(String, int)}).
  *
  * @author Kevin
  */
 public final class ParametricAutomaton {
-    // Process-wide cache of the parametric automaton built for each encountered max edit distance.
-    // Populated atomically via computeIfAbsent, replacing the former unsynchronized static HashMap.
+    /** The maximum max edit distance supported by the packed-vector transition memo. */
+    public static final int MAX_SUPPORTED_EDIT_DISTANCE = 28;
+
+    // Process-wide cache of the parametric automaton per encountered max edit distance
     private static final ConcurrentHashMap<Integer, ParametricAutomaton> AUTOMATON_CACHE =
             new ConcurrentHashMap<>();
 
+    // Sentinel packed transition value denoting a memoized failure transition (all valid packed
+    // values are non-negative)
+    private static final long FAILURE_TRANSITION = Long.MIN_VALUE;
+
+    // Packing layout of characteristic vectors: bits in [6, 6+2n+1), size (<= 2n+1 <= 57) in [0,6)
+    private static final int VECTOR_SIZE_BITS = 6;
+    private static final long VECTOR_SIZE_MASK = (1L << VECTOR_SIZE_BITS) - 1;
+
+    // Packing layout of transition values: target state id in [7, ..), boundary offset in [0,7)
+    private static final int OFFSET_BITS = 7;
+    private static final long OFFSET_MASK = (1L << OFFSET_BITS) - 1;
+
     private final int maxEditDistance;
 
-    // Map containing the transition relationships between the parametrized versions of States in
-    // the automaton defined by maxEditDistance. A null target denotes the failure transition.
-    private final Map<ParametricState, HashMap<AugBitSet, ParametricState>> transitionTable;
+    // Registry of interned parametric state forms: form <-> dense id. statesById/stateCount are
+    // guarded by this (writes happen only on discovery of a new form)
+    private final ConcurrentHashMap<ParametricState, Integer> stateIdByForm =
+            new ConcurrentHashMap<>();
+    private final ArrayList<ParametricState> statesById = new ArrayList<>();
+    private int stateCount = 0;
 
-    // The parametric form of the initial State ({(0, 0)}) shared by every automaton simulation
+    // Lazily-populated transition memo per discovered state id. Snapshots are immutable, so reads
+    // are lock-free; writes (rare, discovery-time only) are synchronized and copy-on-write
+    private final ConcurrentHashMap<Integer, TransitionTable> transitionTableByStateId =
+            new ConcurrentHashMap<>();
+
+    // The parametric form of the initial State ({(0, 0)}) shared by every automaton simulation;
+    // interned as state id 0 at construction
     private final ParametricState initialState;
 
     /**
-     * Procures the ParametricAutomaton for a given max edit distance, building it on first use and
-     * caching it for reuse by every subsequent caller (thread-safe).
+     * Procures the ParametricAutomaton for a given max edit distance, caching it process-wide for
+     * reuse by every subsequent caller (thread-safe). Construction is O(1): the transition table
+     * materializes lazily as queries touch it.
      *
      * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by the
-     *     automaton; must be non-negative
+     *     automaton; must be in [0, {@link #MAX_SUPPORTED_EDIT_DISTANCE}]
      * @return the ParametricAutomaton for {@code maxEditDistance}
      */
     public static ParametricAutomaton forDistance(int maxEditDistance) {
-        if (maxEditDistance < 0)
+        if (maxEditDistance < 0 || maxEditDistance > MAX_SUPPORTED_EDIT_DISTANCE)
             throw new IllegalArgumentException(
-                    "maxEditDistance must be non-negative, got " + maxEditDistance);
+                    "maxEditDistance must be in [0, "
+                            + MAX_SUPPORTED_EDIT_DISTANCE
+                            + "], got "
+                            + maxEditDistance);
 
         return AUTOMATON_CACHE.computeIfAbsent(maxEditDistance, ParametricAutomaton::new);
     }
@@ -95,9 +137,11 @@ public final class ParametricAutomaton {
 
     private ParametricAutomaton(int maxEditDistance) {
         this.maxEditDistance = maxEditDistance;
-        this.transitionTable = createParametricStateTransitionTable(maxEditDistance);
         this.initialState =
                 new ParametricState(new State(new Position[] {new Position(0, 0, false)}));
+        synchronized (this) {
+            intern(initialState); // the initial state always has id 0
+        }
     }
 
     /**
@@ -110,290 +154,231 @@ public final class ParametricAutomaton {
     }
 
     /**
-     * Returns the parametric form of the initial State of any Levenshtein automaton.
+     * Returns the id of the initial state ({@code 0}, kept as a method for readability).
      *
-     * @return a ParametricState representing the State {(0, 0)}
+     * @return an int of the initial state's id
      */
-    public ParametricState getInitialState() {
-        return initialState;
+    public int getInitialStateId() {
+        return 0;
     }
 
     /**
-     * Returns the number of distinct parametric states in this automaton's transition table.
+     * Returns the interned parametric state form registered under a state id.
      *
-     * @return an int of the number of parametric states
+     * @param stateId an int of a state id previously handed out by this automaton
+     * @return the ParametricState form of {@code stateId}
      */
-    public int getStateCount() {
-        return transitionTable.size();
+    public synchronized ParametricState getStateById(int stateId) {
+        return statesById.get(stateId);
     }
 
     /**
-     * Returns an unmodifiable view of the parametric states in this automaton's transition table.
+     * Returns the parametric state forms discovered by this automaton so far.
      *
-     * @return a Set of the ParametricStates of this automaton
+     * <p>Since the transition table materializes lazily, the returned set grows as queries touch
+     * new states (as opposed to the former eager enumeration of every possible form).
+     *
+     * @return an unmodifiable Set of the discovered ParametricStates
      */
-    public Set<ParametricState> getStates() {
-        return Collections.unmodifiableSet(transitionTable.keySet());
+    public synchronized Set<ParametricState> getStates() {
+        return Collections.unmodifiableSet(new HashSet<>(statesById));
     }
 
     /**
-     * Executes a transition of a parametric state on a characteristic vector.
+     * Returns the number of parametric state forms discovered so far.
      *
-     * @param state a ParametricState
-     * @param characteristicVector an AugBitSet representation of the characteristic vector of the
-     *     consuming state's relevant subword with respect to the processing character
-     * @return the ParametricState the transition yields, or null if the transition is a failure
+     * @return an int of the number of discovered parametric states
      */
-    public ParametricState transition(ParametricState state, AugBitSet characteristicVector) {
-        Map<AugBitSet, ParametricState> stateTransitionMap = transitionTable.get(state);
-        return (stateTransitionMap == null ? null : stateTransitionMap.get(characteristicVector));
+    public synchronized int getStateCount() {
+        return stateCount;
     }
 
     /**
-     * Creates a Map containing the transition relationships between the parameterized versions of
-     * States in an automaton defined by a given max edit distance.
+     * Executes (memoizing) a transition of a parametric state on a packed characteristic vector.
      *
-     * <p>Moved as-is from {@code LevenshteinAutomaton.createParametricStateTransitionMap} (which
-     * formerly also cached the result in a static map; caching now lives in {@link #forDistance}).
+     * <p>On first encounter of a (state, vector) pair the transition is computed from the
+     * underlying {@link State}/{@link Position} machinery — exactly as the former eager table build
+     * did — and memoized; subsequent lookups are a lock-free binary search.
      *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by
-     *     specific automaton
-     * @return a HashMap containing the transition relationships between the parametrized versions
-     *     of States in the automaton described by maxEditDistance
+     * @param stateId an int of the source state's id
+     * @param packedVector a long of the packed characteristic vector of the consuming state's
+     *     relevant subword with respect to the processing character (see {@link #packVector})
+     * @return a long of the packed transition ({@link #targetStateId}/{@link
+     *     #transitionBoundaryOffset}), or the failure sentinel (see {@link #isFailureTransition})
      */
-    private static Map<ParametricState, HashMap<AugBitSet, ParametricState>>
-            createParametricStateTransitionTable(int maxEditDistance) {
-        // HashMap which will store the transition relationships between the parametrized
-        // versions of States in the automaton described by maxEditDistance
-        HashMap<ParametricState, HashMap<AugBitSet, ParametricState>> transitionHashMap =
-                new HashMap<>();
-
-        int maxRelevantSubwordSize = 2 * maxEditDistance + 1;
-
-        // Procure the set of ParametricStates collectively describing the forms of all the
-        // States in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        HashSet<ParametricState> parametricStateHashSet =
-                procureParametricStates(maxRelevantSubwordSize, maxEditDistance);
-
-        // Produce all the possible characteristic vectors of sizes 0 to maxEditDistance
-        ArrayList<AugBitSet> characteristicVectorPermutationContainerArrayList =
-                produceBinaryPermutations(maxRelevantSubwordSize);
-
-        // Loop through possible characteristic vectors and ParametricStates, using them to
-        // create transition relationships that will be represented and stored in
-        // transitionHashMap
-        for (AugBitSet characteristicVector : characteristicVectorPermutationContainerArrayList) {
-            for (ParametricState currentParametricState : parametricStateHashSet) {
-                // If States of the form described by currentParametricState have Position
-                // sets that can fit in a relevant subword of the form descirbed by
-                // characteristicVector
-                if (currentParametricState.getLargestPositionOffset()
-                        <= characteristicVector.getRelevantBitSetSize()) {
-                    // Use currentParametricState to create a dummy state with a minimum
-                    // boundary of zero
-                    State currentConcreteState = currentParametricState.createActualState(0);
-
-                    // Execute a transiton on currentConcreteState given maxEditDistance and
-                    // characteristicVector
-                    State transitionState =
-                            currentConcreteState.transition(maxEditDistance, characteristicVector);
-
-                    ParametricState transitionParametricState = null;
-
-                    // If the transition yields a non-failure State, get the result State's
-                    // ParametricState
-                    if (transitionState != null) {
-                        int minimumBoundariesDifference =
-                                State.getMinimumBoundariesDifference(
-                                        currentConcreteState, transitionState);
-                        transitionParametricState =
-                                new ParametricState(transitionState, minimumBoundariesDifference);
-                    }
-
-                    // Store the transition relationship between currentParametricState,
-                    // characteristicVector, and transitionParametricState in transitionHashMap
-                    if (!transitionHashMap.containsKey(currentParametricState))
-                        transitionHashMap.put(currentParametricState, new HashMap<>());
-
-                    transitionHashMap
-                            .get(currentParametricState)
-                            .put(characteristicVector, transitionParametricState);
-                }
-            }
+    public long transition(int stateId, long packedVector) {
+        TransitionTable table = transitionTableByStateId.get(stateId);
+        if (table != null) {
+            int index = Arrays.binarySearch(table.packedVectors, packedVector);
+            if (index >= 0) return table.packedTransitions[index];
         }
 
-        return transitionHashMap;
+        synchronized (this) {
+            table = transitionTableByStateId.get(stateId);
+            int index =
+                    (table == null ? -1 : Arrays.binarySearch(table.packedVectors, packedVector));
+            if (index < 0) table = computeTransition(stateId, packedVector, table);
+            index = Arrays.binarySearch(table.packedVectors, packedVector);
+            return table.packedTransitions[index];
+        }
     }
 
     /**
-     * Procures the collection of ParametricStates collectively representing the forms of every
-     * State in a Levenshtein automaton.
-     *
-     * @param maxRelevantSubwordSize an int denoting the max relevant subword size of a State in a
-     *     Levenshtein automaton (based on {@code maxEditDistance}
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by
-     *     specific automaton
-     * @return a HashSet of Parametric states collectively representing the forms of every State in
-     *     the automaton defined by maxRelevantSubwordSize and maxEditDistance
+     * Computes a transition from the position machinery and stores it copy-on-write. Called only
+     * under this automaton's lock, on a memo miss.
      */
-    private static HashSet<ParametricState> procureParametricStates(
-            int maxRelevantSubwordSize, int maxEditDistance) {
-        // HashSet which will contain ParametricState objects representing the forms of every
-        // state in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        HashSet<ParametricState> parametricStateHashSet = new HashSet<>();
+    private TransitionTable computeTransition(
+            int stateId, long packedVector, TransitionTable current) {
+        State sourceState = getStateById(stateId).createActualState(0);
+        State targetState = sourceState.transition(maxEditDistance, toAugBitSet(packedVector));
 
-        // Loop through the possible relevant subword sizes, collectively using them
-        // to create the set of all possible States, and in turn, ParametricStates
-        // in the automaton defined by maxRelevantSubwordSize and maxEditDistance
-        for (int i = 0; i < maxRelevantSubwordSize; i++) {
-            // Create a base state from the current relevant subword size
-            Position basePosition = new Position(i, 0, false);
+        long packedTransition;
+        if (targetState == null) {
+            packedTransition = FAILURE_TRANSITION;
+        } else {
+            int boundaryOffset = State.getMinimumBoundariesDifference(sourceState, targetState);
+            if (boundaryOffset > OFFSET_MASK)
+                throw new IllegalStateException(
+                        "transition boundary offset "
+                                + boundaryOffset
+                                + " exceeds packing limit; distance too large");
 
-            // Get the States based by basePosition
-            LinkedList<State> basedStateLinkedList =
-                    procureBasedStates(basePosition, maxRelevantSubwordSize, maxEditDistance);
-
-            // Add the parametric versions of each state in basedStateLinkedList to
-            // parametricStateHashSet
-            for (State currentNewState : basedStateLinkedList)
-                parametricStateHashSet.add(new ParametricState(currentNewState));
+            int targetStateId = intern(new ParametricState(targetState));
+            packedTransition = ((long) targetStateId << OFFSET_BITS) | boundaryOffset;
         }
 
-        return parametricStateHashSet;
+        TransitionTable updated = insert(current, packedVector, packedTransition);
+        transitionTableByStateId.put(stateId, updated);
+        return updated;
+    }
+
+    /** Registers a parametric state form (or returns its existing id). Callers hold the lock. */
+    private int intern(ParametricState form) {
+        Integer existingId = stateIdByForm.get(form);
+        if (existingId != null) return existingId;
+
+        int newId = stateCount++;
+        statesById.add(form);
+        stateIdByForm.put(form, newId);
+        return newId;
+    }
+
+    /** Returns whether a packed transition value denotes a failure transition. */
+    public static boolean isFailureTransition(long packedTransition) {
+        return (packedTransition == FAILURE_TRANSITION);
     }
 
     /**
-     * Procures the collection of states that are based by a position, given a maximum relevant
-     * subword size of an automaton state and the max edit distance of an automaton.
+     * Unpacks the target state id of a (non-failure) packed transition value.
      *
-     * @param basePosition the Position that State procurement will be based on
-     * @param maxRelevantSubwordSize an int denoting the max relevant subword size of a State in a
-     *     Levenshtein automaton (based on {@code maxEditDistance}
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed by a
-     *     specific automaton
-     * @return a LinkedList of States that are based by basePosition
+     * @param packedTransition a long produced by {@link #transition(int, long)}
+     * @return an int of the target state's id
      */
-    private static LinkedList<State> procureBasedStates(
-            Position basePosition, int maxRelevantSubwordSize, int maxEditDistance) {
-        // LinkedList which will hold all the States that are based by basePosition
-        LinkedList<State> basedStateLinkedList = new LinkedList<>();
-        basedStateLinkedList.add(new State(new Position[] {basePosition}));
-
-        // Loop through the set of all possible edit distances and boundaries to create
-        // Positions which will be used to creates States that are based by basePosition
-        for (int e = 1; e <= maxEditDistance; e++) {
-            for (int i = 0; i < maxRelevantSubwordSize; i++) {
-                // Create a standard position from the current processing edit distance and
-                // boundary. If it is
-                // subsumed by basePosition, use it to insert States in to basedStateLinkedList that
-                // can be formed
-                // solely by it and the set of Positions appearing as members in the elements of
-                // basedStateLinkedList
-                Position currentPosition = new Position(i, e, false);
-                if (basePosition.subsumes(currentPosition, maxEditDistance))
-                    procureNewBasedStates(basedStateLinkedList, currentPosition, maxEditDistance);
-
-                // If the t-position with the current processing edit distance and boundary is
-                // subsumed by basePosition,
-                // use it to insert States in to basedStateLinkedList in a manner identical to that
-                // used above
-                if (i <= (maxRelevantSubwordSize - 2)) {
-                    // NOTE: the subsumption check below intentionally tests the standard twin
-                    // (currentPosition) rather than the t-position itself, replicating the original
-                    // LevenshteinAutomaton behavior exactly; see PLAN.md section 6.
-                    Position currentTPosition = new Position(i, e, true);
-                    if (basePosition.subsumes(currentPosition, maxEditDistance))
-                        procureNewBasedStates(
-                                basedStateLinkedList, currentTPosition, maxEditDistance);
-                }
-            }
-        }
-
-        return basedStateLinkedList;
+    public static int targetStateId(long packedTransition) {
+        return (int) (packedTransition >>> OFFSET_BITS);
     }
 
     /**
-     * Procures with a collection of commonly based States and a given position, those States which
-     * can be formed using the given position and the set of member positions appearing in the
-     * aforementioned State collection.
+     * Unpacks the minimal-boundary offset of a (non-failure) packed transition value: the minimal
+     * boundary of the target concrete state is that of the source plus this offset.
      *
-     * @param basedStateLinkedList a LinkedList of States collectively based by a given Position
-     * @param p a Position subsumed by the same Position which bases each of the elements in {@code
-     *     basedStateLinkedList}
+     * @param packedTransition a long produced by {@link #transition(int, long)}
+     * @return an int of the transition's minimal-boundary offset
      */
-    private static void procureNewBasedStates(
-            LinkedList<State> basedStateLinkedList, Position p, int maxEditDistance) {
-        // LinkedList which will hold all the States based by basePosition that contain
-        // currentPosition
-        LinkedList<State> newBasedStateLinkedList = new LinkedList<>();
-
-        // Add a State with currentPosition as its sole member to newBasedLinkedList
-        newBasedStateLinkedList.add(new State(new Position[] {p}));
-
-        // Loop through the States in basedStateLinkedList, and for each, determine if its
-        // members Positions can form a State with currentPosition. If so, create a new State
-        // with these set of Positions as members and add it to newBasedLinkedList
-        for (State currentState : basedStateLinkedList) {
-            if (State.canBeState(currentState, p, maxEditDistance))
-                newBasedStateLinkedList.add(new State(currentState, p));
-        }
-
-        // Add all the newly created states to basedStateLinkedList
-        basedStateLinkedList.addAll(newBasedStateLinkedList);
+    public static int transitionBoundaryOffset(long packedTransition) {
+        return (int) (packedTransition & OFFSET_MASK);
     }
 
     /**
-     * Produces all the binary permutations with bit counts less than or equal to a given value.
+     * Packs a characteristic vector into the primitive long key format used by the transition memo:
+     * {@code bits << 6 | size}, with {@code size <= 57}.
      *
-     * @param maxBitCount an int denoting the maximum bit count of a permutation to be produced
-     * @return an ArrayList of AugBitSets that collectively represent the set of binary permutations
-     *     of bit counts from 0 to {@code maxBitCount}
+     * @param bits a long whose bit i denotes whether position i of the relevant subword holds the
+     *     processing character
+     * @param size an int of the relevant subword size (number of significant bits)
+     * @return a long of the packed vector
      */
-    private static ArrayList<AugBitSet> produceBinaryPermutations(int maxBitCount) {
-        // Determine the total number of permutations to be produced
-        int totalPermutationCount = 0;
-        for (int i = 1; i < maxBitCount + 1; i++) totalPermutationCount += Math.pow(2, i);
+    public static long packVector(long bits, int size) {
+        if (size < 0 || size > VECTOR_SIZE_MASK)
+            throw new IllegalArgumentException("vector size out of packable range: " + size);
 
-        // ArrayList of AugBitSets which will each represent a binary permutation. "+1" accomodates
-        // the empty permutation
-        ArrayList<AugBitSet> binaryPermutationContainerArrayList =
-                new ArrayList<>(totalPermutationCount + 1);
+        return (bits << VECTOR_SIZE_BITS) | size;
+    }
 
-        // Add the AugBitSet representstions of the permutations {0} and {1} to
-        // binaryPermutationContainerArrayList
-        for (int i = 0; i <= 1; i++) {
-            binaryPermutationContainerArrayList.add(new AugBitSet(1));
-            binaryPermutationContainerArrayList
-                    .get(binaryPermutationContainerArrayList.size() - 1)
-                    .set(0, (i != 0));
+    /**
+     * Unpacks a packed vector's size (its significant bit count).
+     *
+     * @param packedVector a long in the format produced by {@link #packVector}
+     * @return an int of the vector's size
+     */
+    public static int vectorSize(long packedVector) {
+        return (int) (packedVector & VECTOR_SIZE_MASK);
+    }
+
+    /**
+     * Unpacks a packed vector's bits.
+     *
+     * @param packedVector a long in the format produced by {@link #packVector}
+     * @return a long whose bit i denotes whether position i of the relevant subword holds the
+     *     processing character
+     */
+    public static long vectorBits(long packedVector) {
+        return (packedVector >>> VECTOR_SIZE_BITS);
+    }
+
+    /** Materializes an AugBitSet from a packed vector (used only on memo-miss computations). */
+    private static AugBitSet toAugBitSet(long packedVector) {
+        int size = vectorSize(packedVector);
+        long bits = vectorBits(packedVector);
+
+        AugBitSet characteristicVector = new AugBitSet(size);
+        for (int i = 0; i < size; i++) {
+            if ((bits & (1L << i)) != 0) characteristicVector.set(i);
         }
 
-        // Loop through the AugBitSets in binaryPermutationContainerArrayList, using each to create
-        // new permutations (by separately adding a and 1 to the end of each) that are added to
-        // the end of
-        // the ArrayList. This is done until one is encountered that has a size equal to
-        // maxRelevantSubwordSize
-        for (int i = 0;
-                binaryPermutationContainerArrayList.get(i).getRelevantBitSetSize() < maxBitCount;
-                i++) {
-            // Loop through the set [0,1], using each value to create a new binary permutation
-            // by appending the value to the end of a copy of the permutation located at i
-            for (int j = 0; j <= 1; j++) {
-                AugBitSet currentPermutationBitSet = binaryPermutationContainerArrayList.get(i);
-                AugBitSet newPermutationBitSet =
-                        new AugBitSet(currentPermutationBitSet.getRelevantBitSetSize() + 1);
+        return characteristicVector;
+    }
 
-                newPermutationBitSet.xor(currentPermutationBitSet); // copies the relevant bits in
-                // currentPermutationBitSet
-                newPermutationBitSet.set(
-                        newPermutationBitSet.getRelevantBitSetSize() - 1, (j != 0));
+    /** Copy-on-write insertion into a snapshot's sorted arrays. */
+    private static TransitionTable insert(TransitionTable table, long key, long value) {
+        long[] oldKeys = (table == null ? EMPTY_KEYS : table.packedVectors);
+        long[] oldTransitions = (table == null ? EMPTY_KEYS : table.packedTransitions);
+        int length = oldKeys.length;
 
-                binaryPermutationContainerArrayList.add(newPermutationBitSet);
-            }
+        int insertionIndex = -(Arrays.binarySearch(oldKeys, key)) - 1;
+
+        long[] newKeys = new long[length + 1];
+        long[] newTransitions = new long[length + 1];
+
+        System.arraycopy(oldKeys, 0, newKeys, 0, insertionIndex);
+        System.arraycopy(oldTransitions, 0, newTransitions, 0, insertionIndex);
+        newKeys[insertionIndex] = key;
+        newTransitions[insertionIndex] = value;
+        System.arraycopy(
+                oldKeys, insertionIndex, newKeys, insertionIndex + 1, length - insertionIndex);
+        System.arraycopy(
+                oldTransitions,
+                insertionIndex,
+                newTransitions,
+                insertionIndex + 1,
+                length - insertionIndex);
+
+        return new TransitionTable(newKeys, newTransitions);
+    }
+
+    private static final long[] EMPTY_KEYS = new long[0];
+
+    /**
+     * An immutable snapshot of a state's memoized transitions: packed vectors (sorted) mapped
+     * positionally to packed transition values.
+     */
+    private static final class TransitionTable {
+        final long[] packedVectors;
+        final long[] packedTransitions;
+
+        TransitionTable(long[] packedVectors, long[] packedTransitions) {
+            this.packedVectors = packedVectors;
+            this.packedTransitions = packedTransitions;
         }
-
-        binaryPermutationContainerArrayList.add(
-                new AugBitSet(0)); // Add the empty permutation as well
-        return binaryPermutationContainerArrayList;
     }
 }

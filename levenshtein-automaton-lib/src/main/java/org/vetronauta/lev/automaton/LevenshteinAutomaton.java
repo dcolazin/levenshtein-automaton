@@ -19,11 +19,11 @@
  */
 package org.vetronauta.lev.automaton;
 
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Objects;
 import java.util.Stack;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
 import org.vetronauta.lev.mdag.MDAG;
 import org.vetronauta.lev.mdag.MDAGNode;
 import org.vetronauta.lev.mdag.SimpleMDAGNode;
@@ -35,12 +35,12 @@ import org.vetronauta.lev.mdag.SimpleMDAGNode;
  * <p>An instance represents the automaton D(s, n) for {@code lev(s, ·) <= n} and is the unit of
  * reuse: compile it once and answer any number of membership queries cheaply. Successive calls such
  * as {@code lev(s, s1) < n} and {@code lev(s, s2) < n} share the compiled instance (and the
- * process-wide parametric transition table per distance) instead of rebuilding the automaton per
+ * process-wide parametric transition memo per distance) instead of rebuilding the automaton per
  * query.
  *
  * <pre>{@code
  * LevenshteinAutomaton automaton = LevenshteinAutomaton.compile("kitten", 2);
- * automaton.accepts("sitting");        // false, via memoized table lookups
+ * automaton.accepts("sitting");        // false, via memoized lookups
  * automaton.accepts("mitten");         // true, same instance
  * automaton.fuzzySearch(dictionary);   // dictionary search reusing the same instance
  * }</pre>
@@ -48,22 +48,23 @@ import org.vetronauta.lev.mdag.SimpleMDAGNode;
  * <p>Two compilation modes are available:
  *
  * <ul>
- *   <li>{@link #compile(String, int)} — table-based. Transitions resolve through the parametric
- *       transition table of {@link ParametricAutomaton} (built once per distance, cached
- *       process-wide). Recommended for max edit distances of at most 2; larger distances require
- *       huge amounts of memory.
+ *   <li>{@link #compile(String, int)} — memo-based. Transitions resolve through the lazily
+ *       materialized parametric transition table of {@link ParametricAutomaton} (shared
+ *       process-wide per distance, compactly encoded as primitives; construction is O(1) and memory
+ *       grows only with the (state, vector) pairs actually used). This scales to large max edit
+ *       distances; beyond {@link ParametricAutomaton#MAX_SUPPORTED_EDIT_DISTANCE} it transparently
+ *       falls back to simulation.
  *   <li>{@link #compileIterative(String, int)} — table-free. Transitions are computed on the fly
- *       from member positions (with characteristic vectors still memoized per instance). Advised
- *       for larger max edit distances.
+ *       from member positions, with no shared memo growth at all. Useful when even memoized state
+ *       growth is undesired.
  * </ul>
  *
- * <p>Instances are immutable after compilation and safe to share across threads (memo maps are
- * populated lazily via benign races; contents are deterministic functions of the instance).
+ * <p>Instances are immutable after compilation and safe to share across threads.
  *
  * @author Kevin
  */
 public final class LevenshteinAutomaton {
-    // The State that serves as the initial state of every (non-table-based) automaton simulation
+    // The State that serves as the initial state of every (non-memo-based) automaton simulation
     private static final State initialState = new State(new Position[] {new Position(0, 0, false)});
 
     // The reference String that all edit distance calculations carried out by this automaton are
@@ -76,15 +77,14 @@ public final class LevenshteinAutomaton {
     // The maximum amount of edit operations allowed by this automaton
     private final int maxEditDistance;
 
-    // The string-independent parametric automaton backing table-based operations; null for
-    // instances compiled with compileIterative
+    // The string-independent parametric automaton backing memo-based operations; null for
+    // instances compiled with compileIterative (or beyond the packing-supported distance)
     private final ParametricAutomaton parametricAutomaton;
 
-    // Lazily-populated memo of characteristic vectors, indexed by the minimal boundary of the
-    // consuming State. The vector for a step depends solely on (minimal boundary, letter) given
-    // this automaton's reference String and max edit distance. Buckets are created on first use;
-    // racing threads may briefly create duplicate (equivalent) buckets, which is benign.
-    private final ConcurrentHashMap<Character, AugBitSet>[] characteristicVectorMemoByBoundary;
+    // Occurrence bitmasks of the reference String, one 64-bit-word array per distinct character:
+    // bit i of occurrenceMaskByChar[c] is set iff automatonString.charAt(i) == c. Characteristic
+    // vectors are derived from these in O(1) with zero allocation
+    private final HashMap<Character, long[]> occurrenceMaskByChar;
 
     /**
      * Constructs a LevenshteinAutomaton.
@@ -92,10 +92,11 @@ public final class LevenshteinAutomaton {
      * @param automatonString the reference String that all edit distance calculations are to be
      *     carried out in relation to
      * @param maxEditDistance the maximum amount of edit operations allowed by the automaton
-     * @param tableBased a boolean denoting whether transitions are to be resolved through the
-     *     parametric transition table (as opposed to being computed on the fly)
+     * @param memoized a boolean denoting whether transitions are to be resolved through the shared
+     *     parametric transition memo (as opposed to being computed on the fly); automatically
+     *     downgraded to simulation beyond {@link ParametricAutomaton#MAX_SUPPORTED_EDIT_DISTANCE}
      */
-    private LevenshteinAutomaton(String automatonString, int maxEditDistance, boolean tableBased) {
+    private LevenshteinAutomaton(String automatonString, int maxEditDistance, boolean memoized) {
         Objects.requireNonNull(automatonString, "automatonString");
         if (maxEditDistance < 0)
             throw new IllegalArgumentException(
@@ -104,24 +105,43 @@ public final class LevenshteinAutomaton {
         this.automatonString = automatonString;
         this.automatonStringLength = automatonString.length();
         this.maxEditDistance = maxEditDistance;
-        this.parametricAutomaton =
-                (tableBased ? ParametricAutomaton.forDistance(maxEditDistance) : null);
 
-        @SuppressWarnings("unchecked")
-        ConcurrentHashMap<Character, AugBitSet>[] memo =
-                new ConcurrentHashMap[automatonStringLength + 1];
-        this.characteristicVectorMemoByBoundary = memo;
+        boolean memo =
+                (memoized && maxEditDistance <= ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE);
+        this.parametricAutomaton = (memo ? ParametricAutomaton.forDistance(maxEditDistance) : null);
+        this.occurrenceMaskByChar = (memo ? buildOccurrenceMasks(automatonString) : null);
+    }
+
+    /** Builds the per-character occurrence bitmasks of a reference String. */
+    private static HashMap<Character, long[]> buildOccurrenceMasks(String automatonString) {
+        int length = automatonString.length();
+        HashMap<Character, long[]> occurrenceMaskByChar = new HashMap<>();
+
+        for (int i = 0; i < length; i++) {
+            char c = automatonString.charAt(i);
+            long[] mask = occurrenceMaskByChar.get(c);
+            if (mask == null) {
+                mask = new long[(length + 63) >>> 6];
+                occurrenceMaskByChar.put(c, mask);
+            }
+
+            mask[i >>> 6] |= (1L << (i & 63));
+        }
+
+        return occurrenceMaskByChar;
     }
 
     /**
-     * Compiles a table-based Levenshtein automaton for a reference String and maximum edit
-     * distance. The returned instance can be reused for any number of membership queries and
-     * dictionary searches.
+     * Compiles a memo-based Levenshtein automaton for a reference String and maximum edit distance.
+     * The returned instance can be reused for any number of membership queries and dictionary
+     * searches.
      *
-     * <p>Table-based instances share the parametric transition table built once per max edit
-     * distance (process-wide). Since that table grows roughly with {@code 2^(2n+1)} characteristic
-     * vectors, this mode is recommended for max edit distances of at most 2; use {@link
-     * #compileIterative(String, int)} for larger distances.
+     * <p>Memo-based instances share the lazily materialized parametric transition table of {@link
+     * ParametricAutomaton}, built once per max edit distance process-wide: construction is O(1),
+     * transitions are computed on first use and stored in compact primitive structures, so memory
+     * grows only with the (state, vector) pairs actually touched by queries. This scales to large
+     * max edit distances; beyond {@link ParametricAutomaton#MAX_SUPPORTED_EDIT_DISTANCE} the
+     * instance transparently falls back to table-free simulation.
      *
      * @param automatonString the reference String that all edit distance calculations are to be
      *     carried out in relation to
@@ -135,9 +155,9 @@ public final class LevenshteinAutomaton {
     }
 
     /**
-     * Compiles a table-free Levenshtein automaton whose transitions are computed on the fly (with
-     * characteristic vectors still memoized per instance). Advised for max edit distances greater
-     * than 2, where the parametric transition table would require huge amounts of memory.
+     * Compiles a table-free Levenshtein automaton whose transitions are computed on the fly, with
+     * no shared memo growth at all. Useful when even memoized state growth is undesired (e.g. huge
+     * max edit distances over short-lived automata).
      *
      * @param automatonString the reference String that all edit distance calculations are to be
      *     carried out in relation to
@@ -171,10 +191,10 @@ public final class LevenshteinAutomaton {
     }
 
     /**
-     * Returns a value indicating whether this automaton resolves transitions through the parametric
-     * transition table.
+     * Returns a value indicating whether this automaton resolves transitions through the shared
+     * parametric transition memo.
      *
-     * @return true if this instance is table-based; false if it computes transitions on the fly
+     * @return true if this instance is memo-based; false if it computes transitions on the fly
      */
     public boolean isTableBased() {
         return (parametricAutomaton != null);
@@ -195,9 +215,8 @@ public final class LevenshteinAutomaton {
      * Determines if a String is within this automaton's max edit distance of its reference String,
      * i.e. whether it is a member of this automaton's language.
      *
-     * <p>Table-based instances execute a pure table-lookup walk over the parametric states;
-     * iterative instances simulate the automaton's member positions. In both modes the
-     * characteristic vectors encountered are memoized per instance.
+     * <p>Memo-based instances execute a table-lookup walk over interned parametric states;
+     * iterative instances simulate the automaton's member positions.
      *
      * @param candidate a String to be checked against this automaton
      * @return true if {@code candidate} is within {@code maxEditDistance} edit operations of this
@@ -205,46 +224,43 @@ public final class LevenshteinAutomaton {
      */
     public boolean accepts(String candidate) {
         return (parametricAutomaton != null
-                ? acceptsViaTable(candidate)
+                ? acceptsViaMemo(candidate)
                 : acceptsViaSimulation(candidate));
     }
 
     /**
-     * Carries out a table-lookup walk of the parametric automaton, tracking only the current
-     * parametric state and minimal boundary (no concrete States are materialized).
+     * Carries out a lookup walk of the lazily materialized parametric transition table, tracking
+     * only the current interned state id and minimal boundary (no concrete States are
+     * materialized).
      */
-    private boolean acceptsViaTable(String candidate) {
-        ParametricState currentParametricState = parametricAutomaton.getInitialState();
+    private boolean acceptsViaMemo(String candidate) {
+        int currentStateId = parametricAutomaton.getInitialStateId();
         int minimalBoundary = 0;
 
         for (int i = 0; i < candidate.length(); i++) {
-            AugBitSet characteristicVector =
-                    characteristicVector(minimalBoundary, candidate.charAt(i));
-            ParametricState transitionParametricState =
-                    parametricAutomaton.transition(currentParametricState, characteristicVector);
+            long packedVector = packedVector(minimalBoundary, candidate.charAt(i));
+            long packedTransition = parametricAutomaton.transition(currentStateId, packedVector);
 
-            if (transitionParametricState == null) return false; // failure transition
+            if (ParametricAutomaton.isFailureTransition(packedTransition)) return false;
 
-            minimalBoundary += transitionParametricState.getTransitionBoundaryOffset();
-            currentParametricState = transitionParametricState;
+            currentStateId = ParametricAutomaton.targetStateId(packedTransition);
+            minimalBoundary += ParametricAutomaton.transitionBoundaryOffset(packedTransition);
         }
 
-        return isAcceptingParametricState(currentParametricState, minimalBoundary);
+        return isAcceptingParametricState(
+                parametricAutomaton.getStateById(currentStateId), minimalBoundary);
     }
 
     /**
      * Simulates the automaton on the fly from the initial State, transitioning each encountered
-     * State on the memoized characteristic vector of its relevant subword.
+     * State on its relevant subword's characteristic vector.
      */
     private boolean acceptsViaSimulation(String candidate) {
         State currentState = initialState;
 
         for (int i = 0; i < candidate.length(); i++) {
             currentState =
-                    currentState.transition(
-                            maxEditDistance,
-                            characteristicVector(
-                                    currentState.getMinimalBoundary(), candidate.charAt(i)));
+                    currentState.transition(maxEditDistance, automatonString, candidate.charAt(i));
             if (currentState == null) return false;
         }
 
@@ -252,43 +268,39 @@ public final class LevenshteinAutomaton {
     }
 
     /**
-     * Procures (memoized) the characteristic vector of the relevant subword starting at a minimal
-     * boundary, with respect to a letter. Equivalent to {@code
+     * Procures (in O(1), allocation-free) the packed characteristic vector of the relevant subword
+     * starting at a minimal boundary, with respect to a letter. Equivalent to {@code
      * State.getRelevantSubwordCharacteristicVector(maxEditDistance, automatonString, letter)} for a
-     * State with the given minimal boundary.
+     * State with the given minimal boundary, in the packed format of {@link
+     * ParametricAutomaton#packVector}.
      *
      * @param minimalBoundary an int of the minimal boundary of the consuming State's member
      *     positions
      * @param letter the char that the characteristic vector is to be based off of
-     * @return an AugBitSet representation of the characteristic vector
+     * @return a long of the packed characteristic vector
      */
-    AugBitSet characteristicVector(int minimalBoundary, char letter) {
+    long packedVector(int minimalBoundary, char letter) {
         // Relevant subword size: min(2n+1, |s| - minimalBoundary), clamped at 0
         int relevantSubwordSize =
                 Math.min(2 * maxEditDistance + 1, automatonStringLength - minimalBoundary);
-        if (relevantSubwordSize < 0) relevantSubwordSize = 0;
+        if (relevantSubwordSize <= 0) return ParametricAutomaton.packVector(0L, 0);
 
-        int memoIndex = Math.min(minimalBoundary, automatonStringLength);
-        ConcurrentHashMap<Character, AugBitSet> memo =
-                characteristicVectorMemoByBoundary[memoIndex];
-        if (memo == null) {
-            // Benign race: racing threads may create equivalent buckets; contents are
-            // deterministic so any bucket is valid
-            memo = new ConcurrentHashMap<>();
-            characteristicVectorMemoByBoundary[memoIndex] = memo;
-        }
+        long[] occurrenceMask = occurrenceMaskByChar.get(letter);
+        if (occurrenceMask == null)
+            return ParametricAutomaton.packVector(0L, relevantSubwordSize); // letter not in s
 
-        AugBitSet cachedVector = memo.get(letter);
-        if (cachedVector != null) return cachedVector;
+        // Window the occurrence bits onto [minimalBoundary, minimalBoundary + relevantSubwordSize)
+        int wordIndex = minimalBoundary >>> 6;
+        int bitOffset = minimalBoundary & 63;
 
-        AugBitSet relevantSubwordCharacteristicVector = new AugBitSet(relevantSubwordSize);
-        for (int i = 0; i < relevantSubwordSize; i++) {
-            if (automatonString.charAt(minimalBoundary + i) == letter)
-                relevantSubwordCharacteristicVector.set(i);
-        }
+        long lowBits = occurrenceMask[wordIndex] >>> bitOffset;
+        long highBits =
+                (bitOffset != 0 && wordIndex + 1 < occurrenceMask.length)
+                        ? occurrenceMask[wordIndex + 1] << (64 - bitOffset)
+                        : 0L;
 
-        AugBitSet racedVector = memo.putIfAbsent(letter, relevantSubwordCharacteristicVector);
-        return (racedVector == null ? relevantSubwordCharacteristicVector : racedVector);
+        long bits = (lowBits | highBits) & ((1L << relevantSubwordSize) - 1);
+        return ParametricAutomaton.packVector(bits, relevantSubwordSize);
     }
 
     /**
@@ -308,8 +320,8 @@ public final class LevenshteinAutomaton {
 
     /**
      * Searches a collection of Strings for those which are within this automaton's max edit
-     * distance of its reference String, using the mode this instance was compiled with
-     * (table-lookup walk for table-based instances, on-the-fly simulation otherwise).
+     * distance of its reference String, using the mode this instance was compiled with (memo-lookup
+     * walk for memo-based instances, on-the-fly simulation otherwise).
      *
      * @param mdag an MDAG containing the set of Strings to be processed against this automaton's
      *     reference String
@@ -322,10 +334,10 @@ public final class LevenshteinAutomaton {
 
     /**
      * Searches a collection of Strings for those which are within this automaton's max edit
-     * distance of its reference String, traversing the MDAG in-sync with a table-lookup walk of the
-     * parametric automaton.
+     * distance of its reference String, traversing the MDAG in-sync with a lookup walk of the
+     * lazily materialized parametric transition table.
      *
-     * <p>Requires a table-based instance (see {@link #compile(String, int)}).
+     * <p>Requires a memo-based instance (see {@link #compile(String, int)}).
      *
      * @param mdag an MDAG containing the set of Strings to be processed against this automaton's
      *     reference String
@@ -335,7 +347,7 @@ public final class LevenshteinAutomaton {
     public LinkedList<String> tableFuzzySearch(MDAG mdag) {
         if (parametricAutomaton == null)
             throw new IllegalStateException(
-                    "tableFuzzySearch requires a table-based instance; use compile(String, int)");
+                    "tableFuzzySearch requires a memo-based instance; use compile(String, int)");
 
         // LinkedList which will contain Strings in mdag that are within maxEditDistance of
         // automatonString
@@ -351,7 +363,7 @@ public final class LevenshteinAutomaton {
         // the search process
         processingStepStack.push(
                 new TableProcessingStep(
-                        "", mdag.getSourceNode(), parametricAutomaton.getInitialState(), 0));
+                        "", mdag.getSourceNode(), parametricAutomaton.getInitialStateId(), 0));
 
         char[] charArray = procureTransitionLabelArray(mdag);
         int charCount = charArray.length;
@@ -363,8 +375,7 @@ public final class LevenshteinAutomaton {
             TableProcessingStep currentProcessingStep = processingStepStack.pop();
 
             Object currentNodeObj = currentProcessingStep.mdagTransitionPathEndNode;
-            ParametricState currentParametricState =
-                    currentProcessingStep.lAutomatonTransitionPathEndParametricState;
+            int currentStateId = currentProcessingStep.lAutomatonTransitionPathEndStateId;
             int currentMinimalBoundary =
                     currentProcessingStep.lAutomatonTransitionPathEndMinimalBoundary;
 
@@ -383,16 +394,17 @@ public final class LevenshteinAutomaton {
                                 : ((MDAGNode) currentNodeObj).transition(currentChar));
 
                 if (transitionNode != null) {
-                    // Get the characteristic vector of the current step's relevant subword (with
-                    // respect to currentChar) and use it to look up the transition's result state
-                    AugBitSet rscv = characteristicVector(currentMinimalBoundary, currentChar);
-                    ParametricState transitionParametricState =
-                            parametricAutomaton.transition(currentParametricState, rscv);
+                    // Look up the packed transition from the memo
+                    long packedVector = packedVector(currentMinimalBoundary, currentChar);
+                    long packedTransition =
+                            parametricAutomaton.transition(currentStateId, packedVector);
 
-                    if (transitionParametricState != null) {
+                    if (!ParametricAutomaton.isFailureTransition(packedTransition)) {
+                        int transitionStateId = ParametricAutomaton.targetStateId(packedTransition);
                         int transitionMinimalBoundary =
                                 currentMinimalBoundary
-                                        + transitionParametricState.getTransitionBoundaryOffset();
+                                        + ParametricAutomaton.transitionBoundaryOffset(
+                                                packedTransition);
                         String transitionPathString =
                                 currentProcessingStep.transitionPathString + currentChar;
 
@@ -401,14 +413,15 @@ public final class LevenshteinAutomaton {
                                 new TableProcessingStep(
                                         transitionPathString,
                                         transitionNode,
-                                        transitionParametricState,
+                                        transitionStateId,
                                         transitionMinimalBoundary));
 
                         // If both transitionNode and the automaton state are "accepting", add the
                         // sequence of chars that lead to them to resultStringLinkedList
                         if (MDAG.isAcceptNode(transitionNode)
                                 && isAcceptingParametricState(
-                                        transitionParametricState, transitionMinimalBoundary))
+                                        parametricAutomaton.getStateById(transitionStateId),
+                                        transitionMinimalBoundary))
                             resultStringLinkedList.add(transitionPathString);
                     }
                 }
@@ -470,13 +483,9 @@ public final class LevenshteinAutomaton {
                                 : ((MDAGNode) currentNodeObj).transition(currentChar));
 
                 if (transitionNode != null) {
-                    // Execute a transition on the current automaton State using currentChar (via
-                    // the memoized characteristic vector of its relevant subword)
+                    // Execute a transition on the current automaton State using currentChar
                     State transitionState =
-                            currentState.transition(
-                                    maxEditDistance,
-                                    characteristicVector(
-                                            currentState.getMinimalBoundary(), currentChar));
+                            currentState.transition(maxEditDistance, automatonString, currentChar);
 
                     if (transitionState != null) {
                         // Push the resulting processing step on to the top of processingStepStack
@@ -518,7 +527,7 @@ public final class LevenshteinAutomaton {
     }
 
     /**
-     * An immutable group of objects collectively representing a processing step in a table-based
+     * An immutable group of objects collectively representing a processing step in a memo-based
      * fuzzy search (replacing the former untyped Object[] stack entries).
      */
     private static final class TableProcessingStep {
@@ -528,8 +537,8 @@ public final class LevenshteinAutomaton {
         // The MDAG node of interest in this step
         final Object mdagTransitionPathEndNode;
 
-        // The parametric state of the automaton in this step
-        final ParametricState lAutomatonTransitionPathEndParametricState;
+        // The interned parametric state id of the automaton in this step
+        final int lAutomatonTransitionPathEndStateId;
 
         // The minimal boundary of the automaton's concrete State in this step
         final int lAutomatonTransitionPathEndMinimalBoundary;
@@ -537,12 +546,11 @@ public final class LevenshteinAutomaton {
         TableProcessingStep(
                 String transitionPathString,
                 Object mdagTransitionPathEndNode,
-                ParametricState lAutomatonTransitionPathEndParametricState,
+                int lAutomatonTransitionPathEndStateId,
                 int lAutomatonTransitionPathEndMinimalBoundary) {
             this.transitionPathString = transitionPathString;
             this.mdagTransitionPathEndNode = mdagTransitionPathEndNode;
-            this.lAutomatonTransitionPathEndParametricState =
-                    lAutomatonTransitionPathEndParametricState;
+            this.lAutomatonTransitionPathEndStateId = lAutomatonTransitionPathEndStateId;
             this.lAutomatonTransitionPathEndMinimalBoundary =
                     lAutomatonTransitionPathEndMinimalBoundary;
         }
@@ -575,7 +583,7 @@ public final class LevenshteinAutomaton {
     /**
      * Determines if two Strings are within a specified edit distance of one another.
      *
-     * <p>This static convenience entry point compiles a table-based automaton per call; it is kept
+     * <p>This static convenience entry point compiles a memo-based automaton per call; it is kept
      * for backward compatibility. To actually benefit from the automaton's reusability (and avoid
      * rebuilding per query), compile once and reuse the instance:
      *
@@ -600,7 +608,7 @@ public final class LevenshteinAutomaton {
 
     /**
      * Searches a collection of Strings for those which are within a given edit distance from a
-     * particular String, using the parametric transition table.
+     * particular String, using the parametric transition memo.
      *
      * <p>This static convenience entry point is kept for backward compatibility; compile once and
      * reuse the instance to avoid rebuilding per query.

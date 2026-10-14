@@ -7,8 +7,9 @@ import org.testng.annotations.Test;
 
 /**
  * Characterization tests for {@link ParametricAutomaton} and the compiled instance API. They pin
- * the behavior of the extracted parametric table (moved as-is from LevenshteinAutomaton) by
- * exhaustively comparing it against the dynamic-programming baseline over small alphabets.
+ * the behavior of the lazily materialized parametric transition memo by exhaustively comparing it
+ * against the dynamic-programming baseline over small alphabets — including large max edit
+ * distances, which the former eager cross-product table could not even build.
  */
 public class ParametricAutomatonTest {
 
@@ -34,13 +35,13 @@ public class ParametricAutomatonTest {
 
     /**
      * Exhaustively checks, over every (reference string, candidate) pair on a binary alphabet, that
-     * the table-based and the iterative compiled instances, as well as the deprecated static entry
+     * the memo-based and the iterative compiled instances, as well as the deprecated static entry
      * point, all agree with the classic dynamic-programming answer.
      */
     @Test
     public void exhaustiveBinaryAlphabetAgreesWithClassicLevenshtein() {
         List<String> strings = allStringsOver(new char[] {'a', 'b'}, 5); // 63 strings incl. ""
-        int[] distances = {0, 1, 2};
+        int[] distances = {0, 1, 2, 3};
 
         for (int maxEditDistance : distances) {
             for (String reference : strings) {
@@ -65,11 +66,11 @@ public class ParametricAutomatonTest {
                     Assert.assertEquals(
                             tableBased.accepts(candidate),
                             expected,
-                            "table-based accepts; " + context);
+                            "memo-based accepts; " + context);
                     Assert.assertEquals(
                             tableBased.isWithinEditDistance(candidate),
                             expected,
-                            "table-based isWithinEditDistance; " + context);
+                            "memo-based isWithinEditDistance; " + context);
                     Assert.assertEquals(
                             iterative.accepts(candidate),
                             expected,
@@ -84,24 +85,17 @@ public class ParametricAutomatonTest {
         }
     }
 
-    /**
-     * Same exhaustive comparison over a ternary alphabet with smaller lengths. Table-based
-     * instances are exercised for max edit distances up to 2 only, since building the parametric
-     * transition table for greater distances requires huge amounts of memory (see {@link
-     * ParametricAutomaton}); distance 3 is covered by iterative instances.
-     */
+    /** Same exhaustive comparison over a ternary alphabet with smaller lengths. */
     @Test
     public void exhaustiveTernaryAlphabetAgreesWithClassicLevenshtein() {
         List<String> strings = allStringsOver(new char[] {'a', 'b', 'c'}, 4); // 121 strings
 
-        for (String reference : strings) {
-            for (int maxEditDistance = 1; maxEditDistance <= 3; maxEditDistance++) {
+        for (int maxEditDistance = 1; maxEditDistance <= 3; maxEditDistance++) {
+            for (String reference : strings) {
+                LevenshteinAutomaton tableBased =
+                        LevenshteinAutomaton.compile(reference, maxEditDistance);
                 LevenshteinAutomaton iterative =
                         LevenshteinAutomaton.compileIterative(reference, maxEditDistance);
-                LevenshteinAutomaton tableBased =
-                        (maxEditDistance <= 2
-                                ? LevenshteinAutomaton.compile(reference, maxEditDistance)
-                                : null);
 
                 for (String candidate : strings) {
                     boolean expected =
@@ -117,27 +111,95 @@ public class ParametricAutomatonTest {
                                     + maxEditDistance;
 
                     Assert.assertEquals(
+                            tableBased.accepts(candidate), expected, "memo-based; " + context);
+                    Assert.assertEquals(
                             iterative.accepts(candidate), expected, "iterative; " + context);
-                    if (tableBased != null) {
-                        Assert.assertEquals(
-                                tableBased.accepts(candidate), expected, "table-based; " + context);
-                    }
                 }
             }
         }
     }
 
     /**
+     * Checks that automata for large max edit distances build instantly (lazy memo) and answer
+     * correctly, in both compilation modes — the workload that the former eager table could not
+     * support (its construction exhausted the heap around distance 3-4).
+     */
+    @Test
+    public void bigEditDistanceAutomataBuildAndMatch() {
+        // Distance 4: exhaustive over the binary alphabet, length <= 5
+        List<String> strings = allStringsOver(new char[] {'a', 'b'}, 5);
+        for (String reference : strings) {
+            LevenshteinAutomaton memoBased = LevenshteinAutomaton.compile(reference, 4);
+            LevenshteinAutomaton iterative = LevenshteinAutomaton.compileIterative(reference, 4);
+
+            for (String candidate : strings) {
+                boolean expected =
+                        ClassicLevenshtein.computeEditDistance(reference, candidate) <= 4;
+                String context = "reference='" + reference + "', candidate='" + candidate + "'";
+
+                Assert.assertEquals(memoBased.accepts(candidate), expected, "n=4 memo; " + context);
+                Assert.assertEquals(
+                        iterative.accepts(candidate), expected, "n=4 iterative; " + context);
+            }
+        }
+
+        // Distance 5: exhaustive over the binary alphabet, length <= 3
+        List<String> shortStrings = allStringsOver(new char[] {'a', 'b'}, 3);
+        for (String reference : shortStrings) {
+            LevenshteinAutomaton memoBased = LevenshteinAutomaton.compile(reference, 5);
+            LevenshteinAutomaton iterative = LevenshteinAutomaton.compileIterative(reference, 5);
+
+            for (String candidate : shortStrings) {
+                boolean expected =
+                        ClassicLevenshtein.computeEditDistance(reference, candidate) <= 5;
+                String context = "reference='" + reference + "', candidate='" + candidate + "'";
+
+                Assert.assertEquals(memoBased.accepts(candidate), expected, "n=5 memo; " + context);
+                Assert.assertEquals(
+                        iterative.accepts(candidate), expected, "n=5 iterative; " + context);
+            }
+        }
+
+        // Distance 6: targeted candidates on a longer reference
+        LevenshteinAutomaton memoBased = LevenshteinAutomaton.compile("abcab", 6);
+        LevenshteinAutomaton iterative = LevenshteinAutomaton.compileIterative("abcab", 6);
+        String[] candidates = {
+            "", "a", "ab", "abcab", "abcabab", "ababababab", "xyz", "abcabxyzab", "cbaba"
+        };
+        for (String candidate : candidates) {
+            boolean expected = ClassicLevenshtein.computeEditDistance("abcab", candidate) <= 6;
+            String context = "reference='abcab', candidate='" + candidate + "'";
+
+            Assert.assertEquals(memoBased.accepts(candidate), expected, "n=6 memo; " + context);
+            Assert.assertEquals(
+                    iterative.accepts(candidate), expected, "n=6 iterative; " + context);
+        }
+
+        // Automatic simulation fallback beyond the packing-supported distance
+        int beyond = ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE + 5;
+        LevenshteinAutomaton fallback = LevenshteinAutomaton.compile("abc", beyond);
+        Assert.assertFalse(
+                fallback.isTableBased(), "beyond the packing limit, compile must simulate");
+        Assert.assertTrue(fallback.accepts("abc"));
+        Assert.assertTrue(fallback.accepts(""), "lev('abc','') = 3 <= " + beyond);
+        StringBuilder distant = new StringBuilder();
+        for (int i = 0; i < beyond + 4; i++) distant.append('x');
+        Assert.assertFalse(
+                fallback.accepts(distant.toString()),
+                "lev('abc', 37 x's) = " + (beyond + 4) + " > " + beyond);
+    }
+
+    /**
      * Checks that the O(1) parametric acceptance formula matches the reference per-position
-     * implementation {@code LevenshteinAutomaton.isAcceptState} for every parametric state of the
-     * table and every reachable minimal boundary.
+     * implementation {@code LevenshteinAutomaton.isAcceptState} for every discovered parametric
+     * state and every reachable minimal boundary. Lazy discovery is driven with probe queries
+     * first, since states materialize only as queries touch them.
      */
     @Test
     public void acceptanceFormulaMatchesIsAcceptState() {
         List<String> referenceStrings = allStringsOver(new char[] {'a', 'b'}, 3);
-        // Table-based distances only: building the parametric table for n > 2 requires huge
-        // amounts of memory (see ParametricAutomaton's class Javadoc)
-        int[] distances = {0, 1, 2};
+        List<String> probes = allStringsOver(new char[] {'a', 'b'}, 3);
+        int[] distances = {0, 1, 2, 3};
 
         for (int maxEditDistance : distances) {
             ParametricAutomaton parametricAutomaton =
@@ -147,6 +209,11 @@ public class ParametricAutomatonTest {
             for (String reference : referenceStrings) {
                 LevenshteinAutomaton automaton =
                         LevenshteinAutomaton.compile(reference, maxEditDistance);
+
+                // Drive lazy discovery so the discovered-state set covers this reference's runs
+                for (String probe : probes) {
+                    automaton.accepts(probe);
+                }
 
                 for (ParametricState parametricState : parametricAutomaton.getStates()) {
                     for (int minimalBoundary = 0;
@@ -175,9 +242,12 @@ public class ParametricAutomatonTest {
         }
     }
 
-    /** Checks that the memoized characteristic vector equals the State-derived one. */
+    /**
+     * Checks that the occurrence-mask packed vectors equal the State-derived characteristic
+     * vectors.
+     */
     @Test
-    public void characteristicVectorMemoMatchesStateComputation() {
+    public void packedVectorMatchesStateComputation() {
         int[] distances = {0, 1, 2};
         char[] letters = {'a', 'b', 'z'};
 
@@ -196,9 +266,16 @@ public class ParametricAutomatonTest {
                         AugBitSet expected =
                                 dummyState.getRelevantSubwordCharacteristicVector(
                                         maxEditDistance, reference, letter);
+
+                        long expectedBits = 0L;
+                        for (int i = 0; i < expected.getRelevantBitSetSize(); i++) {
+                            if (expected.get(i)) expectedBits |= (1L << i);
+                        }
+
                         Assert.assertEquals(
-                                automaton.characteristicVector(minimalBoundary, letter),
-                                expected,
+                                automaton.packedVector(minimalBoundary, letter),
+                                ParametricAutomaton.packVector(
+                                        expectedBits, expected.getRelevantBitSetSize()),
                                 "reference='"
                                         + reference
                                         + "', n="
@@ -250,9 +327,14 @@ public class ParametricAutomatonTest {
                 NullPointerException.class, () -> LevenshteinAutomaton.compile(null, 1));
         Assert.assertThrows(
                 IllegalArgumentException.class, () -> ParametricAutomaton.forDistance(-1));
+        Assert.assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        ParametricAutomaton.forDistance(
+                                ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE + 1));
     }
 
-    /** Checks instance accessors and the table-mode dispatch of fuzzySearch. */
+    /** Checks instance accessors and the memo-mode dispatch of fuzzySearch. */
     @Test
     public void instanceMetadataIsExposed() {
         LevenshteinAutomaton tableBased = LevenshteinAutomaton.compile("kitten", 2);
@@ -265,5 +347,12 @@ public class ParametricAutomatonTest {
         Assert.assertFalse(iterative.isTableBased());
         Assert.assertTrue(iterative.accepts("mitten"));
         Assert.assertThrows(IllegalStateException.class, () -> iterative.tableFuzzySearch(null));
+
+        // Beyond the packing limit, compile transparently downgrades to simulation
+        LevenshteinAutomaton beyond =
+                LevenshteinAutomaton.compile(
+                        "abc", ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE + 1);
+        Assert.assertFalse(beyond.isTableBased());
+        Assert.assertTrue(beyond.accepts("abd"));
     }
 }

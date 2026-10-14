@@ -6,6 +6,8 @@ import org.vetronauta.lev.automaton.LevenshteinAutomaton;
 
 import java.util.concurrent.TimeUnit;
 
+import static org.openjdk.jmh.annotations.Level.Iteration;
+
 /**
  * Compares the dynamic-programming baseline against the Levenshtein automaton in two scenarios:
  *
@@ -15,6 +17,9 @@ import java.util.concurrent.TimeUnit;
  *   <li>reused — one compiled instance answering a rotating list of candidate queries, which is
  *       the workload the automaton was implemented for.
  * </ul>
+ *
+ * <p>Since the parametric transition table materializes lazily, compiling for any max edit
+ * distance (including large ones) is instant; the memo fills as queries run.
  */
 @Warmup(iterations = 4, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 4, time = 1, timeUnit = TimeUnit.SECONDS)
@@ -28,8 +33,10 @@ public class SimpleBenchmark {
     };
 
     // Compiled once per benchmark state; every call below reuses the same instance (and the
-    // process-wide parametric table per distance) instead of rebuilding the automaton per query
+    // process-wide parametric memo per distance) instead of rebuilding the automaton per query
     private LevenshteinAutomaton compiledEditDistanceTwo = null;
+    private LevenshteinAutomaton compiledEditDistanceFour = null;
+    private LevenshteinAutomaton compiledEditDistanceEight = null;
 
     private int cursor = 0;
 
@@ -37,14 +44,21 @@ public class SimpleBenchmark {
         return CANDIDATES[(cursor++) % CANDIDATES.length];
     }
 
+    @TearDown(Iteration)
+    public void clean() {
+        compiledEditDistanceTwo = null;
+        compiledEditDistanceFour = null;
+        compiledEditDistanceEight = null;
+    }
+
     @Benchmark
     public boolean classic() {
-        return ClassicLevenshtein.isWithinEditDistanceNonAutomaton(2, "kitten", "sitting");
+        return ClassicLevenshtein.isWithinEditDistanceNonAutomaton(4, "kitten", "sitting");
     }
 
     @Benchmark
     public boolean automaton() {
-        return LevenshteinAutomaton.isWithinEditDistance(2, "kitten", "sitting");
+        return LevenshteinAutomaton.isWithinEditDistance(4, "kitten", "sitting");
     }
 
     @Benchmark
@@ -55,9 +69,27 @@ public class SimpleBenchmark {
     @Benchmark
     public boolean reusedAutomatonEditDistanceTwo() {
         if (compiledEditDistanceTwo == null) {
-            compiledEditDistanceTwo = LevenshteinAutomaton.compile("kitten", 2);
+            compiledEditDistanceTwo =
+                LevenshteinAutomaton.compile("kitten", 2);
         }
         return compiledEditDistanceTwo.accepts(nextCandidate());
     }
 
+    @Benchmark
+    public boolean reusedAutomatonEditDistanceFour() {
+        if (compiledEditDistanceFour == null) {
+            compiledEditDistanceFour =
+                LevenshteinAutomaton.compile("kitten", 4);
+        }
+        return compiledEditDistanceFour.accepts(nextCandidate());
+    }
+
+    @Benchmark
+    public boolean reusedAutomatonEditDistanceEight() {
+        if (compiledEditDistanceEight == null) {
+            compiledEditDistanceEight =
+                LevenshteinAutomaton.compile("floccinaucinihilipilification", 8);
+        }
+        return compiledEditDistanceEight.accepts(nextCandidate());
+    }
 }

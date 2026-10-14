@@ -156,3 +156,36 @@ per-instance memos ~= (|s|+1) map slots x observed alphabet for vectors.
   exhaustive tests.
 - **Memory guidance:** table mode intended for `n <= 2` (as today); `compileIterative` covers the
   rest.
+
+## 7. Revision — scalable data structures (Phase 6)
+
+The table-mode design of section 3 still eagerly materialized the full cross product of parametric
+states × characteristic vectors as `Map<ParametricState, HashMap<AugBitSet, ParametricState>>`,
+whose cost (object-heavy `AugBitSet` keys, boxed entries, nested `HashMap` tables — roughly
+130 KB per state at `n = 4`, times thousands of states) made distances beyond 2 practically
+unbuildable: memory is O(states(n) × 2^(2n+1)) regardless of what queries actually need. Four
+data-structure changes fix this:
+
+1. **Lazy transition memo instead of eager cross-product.** `ParametricAutomaton` now interns
+   parametric state forms to dense `int` ids and computes transitions on demand from the existing
+   `State`/`Position` machinery, memoizing only the (state, vector) pairs actually touched by
+   queries. Construction is O(1); memory ∝ usage. The eager state enumeration
+   (`procureParametricStates`, `procureBasedStates`, `procureNewBasedStates`,
+   `produceBinaryPermutations`) is deleted — and with it the t-position subsumption quirk of
+   section 6, which lived exclusively in that enumeration. Failure transitions are memoized too
+   (a sentinel value).
+2. **Characteristic vectors as packed primitive `long`s** (`bits << 6 | size`, size ≤ 2n+1 ≤ 57)
+   replace `AugBitSet` keys and per-step allocations.
+3. **Per-state copy-on-write sorted `long[]` transition snapshots** (16 bytes per entry; immutable
+   snapshots make reads lock-free, writes are synchronized and rare) replace the nested
+   `HashMap`s. Transition values pack `(targetStateId << 7) | boundaryOffset`.
+4. **Per-character occurrence bitmasks of the reference string** replace the per-instance
+   `(boundary, char)` vector memo: the vector is `(occMask[c] >>> minB) & windowMask` — O(1) and
+   allocation-free.
+
+`compile(s, n)` now scales to any practical distance. The memo's vector packing supports
+distances up to `ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE = 28`; beyond that, compilation
+transparently falls back to the table-free simulation (which works for arbitrary `n`). The
+exhaustive characterization tests now cover memo mode through distance 6 (the former eager table
+exhausted the default heap building distance 3), and the committed benchmark runs `n = 4` and
+`n = 8` scenarios out of the box.
