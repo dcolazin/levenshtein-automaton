@@ -49,28 +49,6 @@ public class State {
     }
 
     /**
-     * Constructs a State from an existing State and a Position that is not a member, but satisfies
-     * the requirements of membership in the State.
-     *
-     * @param s a State
-     * @param p a Position that satisfies the membership requirements of {@code s}
-     */
-    public State(State s, Position p) {
-        // Calculate to-be-created State's member Position array size (simply an increment of that
-        // of the argument state)
-        int newMemberPositionArrayLength = s.memberPositionArray.length + 1;
-
-        // Copy the members of the argument State in to the member array of this State, adding the
-        // argument position at the end
-        memberPositionArray = Arrays.copyOf(s.memberPositionArray, newMemberPositionArrayLength);
-        memberPositionArray[newMemberPositionArrayLength - 1] = p;
-
-        // Sort the (possibly out of order) Positions in this State's member array
-        // (p is not guarenteed to be greater than the members of S)
-        Arrays.sort(memberPositionArray);
-    }
-
-    /**
      * Creates a State from the Positions serving as members in a collection of States.
      *
      * @param stateCollection a Collection of States
@@ -116,15 +94,6 @@ public class State {
                 prospectiveMemberPositionCollection.toArray(
                         new Position[prospectiveMemberPositionCollection.size()]);
         Arrays.sort(memberPositionArray);
-    }
-
-    /**
-     * Retrieves the smallest boundary value held by a Position in this State's member set.
-     *
-     * @return an int of the smallest boundary value held by a Position in this State's member set
-     */
-    public int getMinimalBoundary() {
-        return memberPositionArray[0].getI();
     }
 
     /**

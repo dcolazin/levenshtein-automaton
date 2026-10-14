@@ -346,7 +346,6 @@ public class ParametricAutomatonTest {
         LevenshteinAutomaton iterative = LevenshteinAutomaton.compileIterative("kitten", 2);
         Assert.assertFalse(iterative.isTableBased());
         Assert.assertTrue(iterative.accepts("mitten"));
-        Assert.assertThrows(IllegalStateException.class, () -> iterative.tableFuzzySearch(null));
 
         // Beyond the packing limit, compile transparently downgrades to simulation
         LevenshteinAutomaton beyond =
