@@ -189,3 +189,98 @@ transparently falls back to the table-free simulation (which works for arbitrary
 exhaustive characterization tests now cover memo mode through distance 6 (the former eager table
 exhausted the default heap building distance 3), and the committed benchmark runs `n = 4` and
 `n = 8` scenarios out of the box.
+
+## 8. Formal properties, limitations & representability
+
+### 8.1 What is proven, assumed, and tested
+
+Correctness rests on three properties *assumed from the literature* (pinned by bounded-exhaustive
+tests, not machine-checked proof):
+
+1. **Position transition table** — `Position.procureTransition` is a faithful transcription of
+   the Schulz–Mihov position-transition figure (including the delete-to-first-hit rule). It is
+   the oracle for every on-miss transition computation.
+2. **Parametricity** — the transition function of a state depends only on its *form* and the
+   characteristic vector, never on the absolute boundary. This underwrites computing every
+   transition from `createActualState(0)` and sharing one memo per distance across all reference
+   strings.
+3. **Subsumption reduction** — `Position.subsumes` is a valid position-set reduction for the
+   metric.
+
+Mechanical properties discharged in-code or by derivation:
+
+- **Acceptance formula** (`minB >= |s| - n + min_j(e_j - offset_j)`) is an exact algebraic
+  rewriting of the per-position rule (it uses only `i`/`e`, so it holds for t-positions too) and
+  is additionally verified by test over every discovered state × every minimal boundary.
+- **Packing bounds** are validated at pack time (`packVector` size checks, the boundary-offset
+  guard).
+
+Empirical assurance: exhaustive equivalence vs `ClassicLevenshtein` over alphabets {a,b}
+(lengths ≤ 5, distances 0–3) and {a,b,c} (lengths ≤ 4, distances 1–3), big-distance
+exhaustive/targeted checks at distances 4–6, plus dictionary-level tests on `words.txt`.
+
+### 8.2 Semantic scope
+
+- The metric is **restricted Damerau–Levenshtein** (optimal string alignment): insert, delete,
+  substitute, transpose adjacent, no substring edited more than once. It is *not* unrestricted
+  Damerau–Levenshtein; both the automaton and the DP baseline implement the same metric.
+- Characters are **UTF-16 code units**: a transposition may cross a surrogate pair, and distances
+  differ from code-point semantics; no Unicode normalization is applied.
+
+### 8.3 Was the pre-Phase-6 (eager) implementation formally correct, given infinite memory?
+
+Component-wise: parametricity sound; characteristic-vector enumeration provably complete (all bit
+strings of length 0..2n+1 plus the empty one); transition/offset/acceptance bookkeeping sound.
+The weak link was the **state enumeration** in `procureBasedStates`: the t-position branch tested
+subsumption of the *standard twin* (`|i − I| ≤ e`) instead of the t-position itself (correct:
+`|i − (I−1)| ≤ e`). With base `(I, 0)` and edit count `e`:
+
+- the twin admits `i ∈ [I−e, I+e]`; the correct predicate admits `i ∈ [I−e−1, I+e−1]`;
+- hence the enumeration **over-admitted** t-positions at `i = I+e` (unreachable extra forms —
+  pure memory waste) and could **under-admit** at `i = I−e−1` (a completeness gap).
+
+If a reachable form was ever omitted, the runtime lookup `transitionHashMap.get(form).get(vector)`
+dereferenced null — a **fail-fast NPE, never a silently wrong answer**. Whether any reachable
+state requires such a t-position was never determined, and could not be: the eager table
+exhausted the heap at distances 3–4 while the test suite only randomized distances 1–2, so the
+"infinite memory" premise was precisely the untestable one. Verdict: *empirically correct on every
+input ever run; formally unestablished for the transposition construction.* Phase 6 removed the
+proof obligation by construction: states are discovered by applying δ and interned on first
+encounter, so the reachable set is covered trivially and unreachable forms cost nothing.
+
+### 8.4 Representability: maximum sizes
+
+| Quantity | Memo mode (`compile`) | Simulation (`compileIterative` / fallback) |
+|---|---|---|
+| Max edit distance | **28** (`MAX_SUPPORTED_EDIT_DISTANCE`) | any non-negative `int` |
+| Reference string length | unbounded (see below) | unbounded |
+| Candidate length | unbounded (early-exit on failure) | unbounded |
+| Discovered states | `int` ids (theoretical 2^31) | — |
+
+- **Why exactly 28:** a characteristic vector packs as `bits << 6 | size` in one `long`. The
+  window has `min(2n+1, |s| − minB)` bits at bit-positions 0..2n, so no bit is lost iff
+  `(2n+1) + 6 ≤ 63`, i.e. `n ≤ 28`. The 6-bit size field caps at 63 (window ≤ 57 here); the
+  boundary offset packs in 7 bits, is provably ≤ 2n+1 ≤ 57 < 128 for supported `n`, and is
+  guarded fail-fast regardless. Packed keys are always non-negative, keeping `binarySearch`'s
+  signed order consistent.
+- **String length is never packed.** Occurrence masks are `⌈|s|/64⌉`-word arrays per distinct
+  character (`O(|Σ(s)| · |s|/64)` memory), and the packed vector encodes only the ≤ 57-bit
+  *window* around the minimal boundary — a 1 MB reference string works exactly like a 6-char one.
+  The only cap on `|s|` is Java's own `String` limit (2^31 − 1). Positions and the minimal
+  boundary never exceed `|s|` (the deletion rule advances at most to the window's end), so all
+  indices stay comfortably within `int` range.
+- **The gate is conservative:** for reference strings with `|s| ≤ 57`, every window has ≤ 57 bits
+  *regardless of n* (windows are `min(2n+1, |s| − minB)`), so the packing could represent any
+  distance. The code gates on `n` alone for simplicity; a possible refinement is to gate on
+  `min(2n+1, |s|) ≤ 57` and allow any `n` for short strings.
+- **Beyond 28**, `compile` transparently downgrades to simulation: still correct for any `int`
+  `n`, but per-query cost is O(|candidate| · n) with no memo (a performance cliff, not a
+  correctness gap), and `tableFuzzySearch` throws `IllegalStateException`.
+
+### 8.5 Resource properties
+
+- Memo memory is finite but **unbounded with usage** (proportional to touched (state, vector)
+  pairs); there is no eviction, and `clearCache()` is global rather than per-distance. The cache
+  itself is capped at 29 entries (distances 0–28).
+- Transition misses serialize on a single lock per distance (no deadlock by construction; reads
+  are lock-free immutable snapshots).
