@@ -36,7 +36,6 @@ import java.util.Objects;
  * LevenshteinAutomaton automaton = LevenshteinAutomaton.compile("kitten", 2);
  * automaton.accepts("sitting");        // false, via memoized lookups
  * automaton.accepts("mitten");         // true, same instance
- * automaton.fuzzySearch(dictionary);   // dictionary search reusing the same instance
  * }</pre>
  *
  * <p>Two compilation modes are available:
@@ -53,6 +52,13 @@ import java.util.Objects;
  *       growth is undesired.
  * </ul>
  *
+ * <p>Reference strings of any length are supported for every practical max edit distance
+ * (occurrence bitmasks scale as {@code distinct(s) · |s|/64} words). Only the extreme corner of
+ * large distances on long strings ({@code |s| > 63} and {@code n > 31}, where the
+ * characteristic-vector window would exceed a 64-bit word) degrades gracefully: membership queries
+ * are answered via length bounds plus the dynamic-programming baseline, the appropriate algorithm
+ * at such distances anyway.
+ *
  * <p>Instances are immutable after compilation and safe to share across threads.
  *
  * @author Kevin
@@ -60,6 +66,9 @@ import java.util.Objects;
 public final class LevenshteinAutomaton {
     // The State that serves as the initial state of every (non-memo-based) automaton simulation
     private static final State initialState = new State(new Position[] {new Position(0, 0, false)});
+
+    // The maximum characteristic-vector window size representable in a single long
+    private static final int MAX_WINDOW_SIZE = 63;
 
     // The reference String that all edit distance calculations carried out by this automaton are
     // relative to
@@ -77,8 +86,14 @@ public final class LevenshteinAutomaton {
 
     // Occurrence bitmasks of the reference String, one 64-bit-word array per distinct character:
     // bit i of occurrenceMaskByChar[c] is set iff automatonString.charAt(i) == c. Characteristic
-    // vectors are derived from these in O(1) with zero allocation
+    // vectors are derived from these in O(1) with zero allocation. Null for DP-backed instances
+    // (see dpBacked below)
     private final HashMap<Character, long[]> occurrenceMaskByChar;
+
+    // True only for the extreme corner of large distances on long strings (|s| > 63 && n > 31,
+    // where the characteristic-vector window would exceed a 64-bit word): membership queries are
+    // answered via length bounds plus the dynamic-programming baseline instead of automaton walks
+    private final boolean dpBacked;
 
     /**
      * Constructs a LevenshteinAutomaton.
@@ -99,11 +114,18 @@ public final class LevenshteinAutomaton {
         this.automatonString = automatonString;
         this.automatonStringLength = automatonString.length();
         this.maxEditDistance = maxEditDistance;
+        this.parametricAutomaton =
+                (memoized && maxEditDistance <= ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE
+                        ? ParametricAutomaton.forDistance(maxEditDistance)
+                        : null);
 
-        boolean memo =
-                (memoized && maxEditDistance <= ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE);
-        this.parametricAutomaton = (memo ? ParametricAutomaton.forDistance(maxEditDistance) : null);
-        this.occurrenceMaskByChar = (memo ? buildOccurrenceMasks(automatonString) : null);
+        // Graceful degradation for the extreme corner of large distances on long strings: the
+        // characteristic-vector window min(2n+1, |s| - minB) would exceed a 64-bit word, so
+        // membership queries fall back to length bounds plus the DP baseline
+        this.dpBacked =
+                (automatonStringLength > MAX_WINDOW_SIZE
+                        && 2 * maxEditDistance + 1 > MAX_WINDOW_SIZE);
+        this.occurrenceMaskByChar = (dpBacked ? null : buildOccurrenceMasks(automatonString));
     }
 
     /** Builds the per-character occurrence bitmasks of a reference String. */
@@ -127,8 +149,7 @@ public final class LevenshteinAutomaton {
 
     /**
      * Compiles a memo-based Levenshtein automaton for a reference String and maximum edit distance.
-     * The returned instance can be reused for any number of membership queries and dictionary
-     * searches.
+     * The returned instance can be reused for any number of membership queries.
      *
      * <p>Memo-based instances share the lazily materialized parametric transition table of {@link
      * ParametricAutomaton}, built once per max edit distance process-wide: construction is O(1),
@@ -150,8 +171,7 @@ public final class LevenshteinAutomaton {
 
     /**
      * Compiles a table-free Levenshtein automaton whose transitions are computed on the fly, with
-     * no shared memo growth at all. Useful when even memoized state growth is undesired (e.g. huge
-     * max edit distances over short-lived automata).
+     * no shared memo growth at all. Useful when even memoized state growth is undesired.
      *
      * @param automatonString the reference String that all edit distance calculations are to be
      *     carried out in relation to
@@ -210,16 +230,38 @@ public final class LevenshteinAutomaton {
      * i.e. whether it is a member of this automaton's language.
      *
      * <p>Memo-based instances execute a table-lookup walk over interned parametric states;
-     * iterative instances simulate the automaton's member positions.
+     * iterative instances simulate the automaton's member positions; DP-backed instances (extreme
+     * distances on long strings) use length bounds plus the dynamic-programming baseline.
      *
      * @param candidate a String to be checked against this automaton
      * @return true if {@code candidate} is within {@code maxEditDistance} edit operations of this
      *     automaton's reference String; false otherwise
      */
     public boolean accepts(String candidate) {
+        if (dpBacked) return acceptsViaDynamicProgramming(candidate);
+
         return (parametricAutomaton != null
                 ? acceptsViaMemo(candidate)
                 : acceptsViaSimulation(candidate));
+    }
+
+    /**
+     * Answers membership for DP-backed instances (the extreme corner of {@code |s| > 63} and {@code
+     * n > 31}): cheap length bounds first, then the dynamic-programming baseline — the appropriate
+     * algorithm at such distances, where neighborhoods are far too large for an automaton walk to
+     * pay off anyway.
+     */
+    private boolean acceptsViaDynamicProgramming(String candidate) {
+        int candidateLength = candidate.length();
+
+        // lev(s, x) >= ||s| - |x||: reject candidates whose length is too far off
+        if (Math.abs(automatonStringLength - candidateLength) > maxEditDistance) return false;
+
+        // lev(s, x) <= |s| + |x| (delete all of s, insert all of x): trivially accept
+        if (automatonStringLength + candidateLength <= maxEditDistance) return true;
+
+        return ClassicLevenshtein.computeEditDistance(automatonString, candidate)
+                <= maxEditDistance;
     }
 
     /**
@@ -247,14 +289,18 @@ public final class LevenshteinAutomaton {
 
     /**
      * Simulates the automaton on the fly from the initial State, transitioning each encountered
-     * State on its relevant subword's characteristic vector.
+     * State on its relevant subword's (primitive) characteristic vector.
      */
     private boolean acceptsViaSimulation(String candidate) {
         State currentState = initialState;
 
         for (int i = 0; i < candidate.length(); i++) {
+            int minimalBoundary = currentState.getMemberPositions()[0].getI();
+            int relevantSubwordSize = relevantSubwordSize(minimalBoundary);
+            long vectorBits = windowBits(minimalBoundary, relevantSubwordSize, candidate.charAt(i));
+
             currentState =
-                    currentState.transition(maxEditDistance, automatonString, candidate.charAt(i));
+                    currentState.transition(maxEditDistance, vectorBits, relevantSubwordSize);
             if (currentState == null) return false;
         }
 
@@ -262,28 +308,25 @@ public final class LevenshteinAutomaton {
     }
 
     /**
-     * Procures (in O(1), allocation-free) the packed characteristic vector of the relevant subword
-     * starting at a minimal boundary, with respect to a letter. Equivalent to {@code
-     * State.getRelevantSubwordCharacteristicVector(maxEditDistance, automatonString, letter)} for a
-     * State with the given minimal boundary, in the packed format of {@link
-     * ParametricAutomaton#packVector}.
-     *
-     * @param minimalBoundary an int of the minimal boundary of the consuming State's member
-     *     positions
-     * @param letter the char that the characteristic vector is to be based off of
-     * @return a long of the packed characteristic vector
+     * Returns the relevant subword size for a minimal boundary: {@code min(2n+1, |s| - minB)},
+     * clamped at 0.
      */
-    long packedVector(int minimalBoundary, char letter) {
-        // Relevant subword size: min(2n+1, |s| - minimalBoundary), clamped at 0
+    private int relevantSubwordSize(int minimalBoundary) {
         int relevantSubwordSize =
                 Math.min(2 * maxEditDistance + 1, automatonStringLength - minimalBoundary);
-        if (relevantSubwordSize <= 0) return ParametricAutomaton.packVector(0L, 0);
+        return (relevantSubwordSize < 0 ? 0 : relevantSubwordSize);
+    }
+
+    /**
+     * Windows the occurrence bits of a letter onto {@code [minimalBoundary, minimalBoundary +
+     * relevantSubwordSize)} — the characteristic vector's bits, in O(1) and allocation-free.
+     */
+    private long windowBits(int minimalBoundary, int relevantSubwordSize, char letter) {
+        if (relevantSubwordSize <= 0) return 0L;
 
         long[] occurrenceMask = occurrenceMaskByChar.get(letter);
-        if (occurrenceMask == null)
-            return ParametricAutomaton.packVector(0L, relevantSubwordSize); // letter not in s
+        if (occurrenceMask == null) return 0L; // letter not in s
 
-        // Window the occurrence bits onto [minimalBoundary, minimalBoundary + relevantSubwordSize)
         int wordIndex = minimalBoundary >>> 6;
         int bitOffset = minimalBoundary & 63;
 
@@ -293,8 +336,23 @@ public final class LevenshteinAutomaton {
                         ? occurrenceMask[wordIndex + 1] << (64 - bitOffset)
                         : 0L;
 
-        long bits = (lowBits | highBits) & ((1L << relevantSubwordSize) - 1);
-        return ParametricAutomaton.packVector(bits, relevantSubwordSize);
+        return (lowBits | highBits) & ((1L << relevantSubwordSize) - 1);
+    }
+
+    /**
+     * Procures the packed characteristic vector of the relevant subword starting at a minimal
+     * boundary, with respect to a letter, in the packed format of {@link
+     * ParametricAutomaton#packVector} (memo mode only, where windows are at most 57 bits).
+     *
+     * @param minimalBoundary an int of the minimal boundary of the consuming State's member
+     *     positions
+     * @param letter the char that the characteristic vector is to be based off of
+     * @return a long of the packed characteristic vector
+     */
+    long packedVector(int minimalBoundary, char letter) {
+        int relevantSubwordSize = relevantSubwordSize(minimalBoundary);
+        return ParametricAutomaton.packVector(
+                windowBits(minimalBoundary, relevantSubwordSize, letter), relevantSubwordSize);
     }
 
     /**
@@ -310,32 +368,6 @@ public final class LevenshteinAutomaton {
     boolean isAcceptingParametricState(ParametricState s, int minimalBoundary) {
         return (minimalBoundary
                 >= automatonStringLength - maxEditDistance + s.getAcceptanceThresholdOffset());
-    }
-
-    /**
-     * Determines if two Strings are within a specified edit distance of one another.
-     *
-     * <p>This static convenience entry point compiles a memo-based automaton per call; it is kept
-     * for backward compatibility. To actually benefit from the automaton's reusability (and avoid
-     * rebuilding per query), compile once and reuse the instance:
-     *
-     * <pre>{@code
-     * LevenshteinAutomaton automaton = LevenshteinAutomaton.compile(str1, maxEditDistance);
-     * automaton.isWithinEditDistance(str2);
-     * }</pre>
-     *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations allowed to be
-     *     used to (hypothetically) turn one String in to another
-     * @param str1 a String
-     * @param str2 a String
-     * @return true if {@code str1} and {@code str2} are within {@code maxEditDistance} edit
-     *     operations of each other; false otherwise
-     * @deprecated use {@link #compile(String, int)} and reuse the resulting instance's {@link
-     *     #isWithinEditDistance(String)}
-     */
-    @Deprecated
-    public static boolean isWithinEditDistance(int maxEditDistance, String str1, String str2) {
-        return compile(str1, maxEditDistance).accepts(str2);
     }
 
     /**

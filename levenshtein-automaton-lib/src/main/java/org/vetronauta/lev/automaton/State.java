@@ -106,59 +106,24 @@ public class State {
     }
 
     /**
-     * Procures an object representation of the characteristic vector of this State's relevant
-     * subword.
-     *
-     * @param maxEditDistance an int of the maximum number of edit operations desired
-     * @param automatonString the String containing the char sequence that the characteristic vector
-     *     is to be based off
-     * @param letter the char that the characteristic vector is to be based off of
-     * @return an AugBitSet representation of the characteristic vector of this State's relevant
-     *     subword
-     */
-    public AugBitSet getRelevantSubwordCharacteristicVector(
-            int maxEditDistance, String automatonString, char letter) {
-        // Isolate the substring in automatonString that serves as this State's relevant subword
-        int minimalPositionBoundary = memberPositionArray[0].getI();
-        int relevantSubwordSize =
-                Math.min(
-                        2 * maxEditDistance + 1,
-                        automatonString.length() - minimalPositionBoundary);
-        String relevantSubword =
-                automatonString.substring(
-                        minimalPositionBoundary, minimalPositionBoundary + relevantSubwordSize);
-
-        // Create an AugBitSet that will be used represent the characteristic vector of
-        // relevantSubword
-        AugBitSet relevantSubwordCharacteristicVector = new AugBitSet(relevantSubwordSize);
-
-        // Loop through the chars in relevantSubword, setting the corresponding bit in
-        // relevantSubwordCharacteristicVector to true if it is equal to letter, and false otherwise
-        for (int i = 0; i < relevantSubwordSize; i++) {
-            if (relevantSubword.charAt(i) == letter) relevantSubwordCharacteristicVector.set(i);
-        }
-
-        return relevantSubwordCharacteristicVector;
-    }
-
-    /**
      * Returns the State resulting from the processing of this State and the characteristic vector
      * of its relevant subword.
      *
      * @param maxEditDistance an int of the maximum number of edit operations desired
-     * @param relevantSubwordCharacteristicVector an AugBitSet representation of the characteristic
-     *     vector of this State's relevant subword
+     * @param vectorBits a long whose bit k denotes whether position k of this State's relevant
+     *     subword holds the processing char
+     * @param vectorSize an int of the bit count of the characteristic vector
      * @return the State resulting from the transitions of each of this State's member Positions
      *     (with regards to the arguments) or null if none of these transitions yields a non-failure
      *     State
      */
-    public State transition(int maxEditDistance, AugBitSet relevantSubwordCharacteristicVector) {
+    public State transition(int maxEditDistance, long vectorBits, int vectorSize) {
         // HashSet which will hold the States resulting from transitioning each Position in
         // memberPositionArray
         HashSet<State> newStateHashSet = new HashSet<>();
 
-        // The int which will be used to determine the index in relevantSubwordCharacteristicVector
-        // that the relevant subwords of positions in memberPositionArray start at
+        // The int which will be used to determine the index in the characteristic vector that the
+        // relevant subwords of positions in memberPositionArray start at
         int boundaryOffset = memberPositionArray[0].getI();
 
         // Perform a transition on each member position, adding the resulting
@@ -166,30 +131,11 @@ public class State {
         for (Position p : memberPositionArray) {
             State transitionState =
                     p.transition(
-                            maxEditDistance,
-                            p.getI() - boundaryOffset,
-                            relevantSubwordCharacteristicVector);
+                            maxEditDistance, p.getI() - boundaryOffset, vectorBits, vectorSize);
             if (transitionState != null) newStateHashSet.add(transitionState);
         }
 
         return (newStateHashSet.isEmpty() ? null : new State(newStateHashSet, maxEditDistance));
-    }
-
-    /**
-     * Returns the State resulting from the processing of this State, its relevant subword (in
-     * regards to a given String) and a given character.
-     *
-     * @param maxEditDistance an int of the maximum number of edit operations desired
-     * @param automatonString the String that the transition is to be based off of
-     * @param letter the letter that the transition is to be based off of
-     * @return the State resulting from the transitions of each of this State's member Positions
-     *     (with regards to the arguments) or null if none of these transitions yields a non-failure
-     *     State
-     */
-    public State transition(int maxEditDistance, String automatonString, char letter) {
-        return transition(
-                maxEditDistance,
-                getRelevantSubwordCharacteristicVector(maxEditDistance, automatonString, letter));
     }
 
     /**
@@ -206,30 +152,6 @@ public class State {
             returnString.append(" ").append(memberPositionArray[i].toString());
 
         return returnString.toString();
-    }
-
-    /**
-     * Determines if a given Position satisfies State membership requirements with every Position in
-     * a State.
-     *
-     * @param state a State
-     * @param prospectivePosition a Position which is subsumbed by a base position that also
-     *     subsumes all members in {@code stateMemberPositionArray}
-     * @param maxEditDistance the maximum amount of edit operations allowed by the automaton
-     *     associated with {@code state} (and commutatively, the prospective state defined by the
-     *     collection of the members of {@code state} and {@code prospectivePosition})
-     * @return true if {@code prospectivePosition} is not subsumbed by any Positions in {@code
-     *     stateMemberPositionArray}, false otherwise
-     */
-    public static boolean canBeState(
-            State state, Position prospectivePosition, int maxEditDistance) {
-        // Loop through the Positions in state's member Position array, determining
-        // (and returning false if) any subsume prospectivePosition
-        for (Position currentMemberPosition : state.memberPositionArray) {
-            if (currentMemberPosition.subsumes(prospectivePosition, maxEditDistance)) return false;
-        }
-
-        return true;
     }
 
     /**

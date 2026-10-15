@@ -1,8 +1,5 @@
 package org.vetronauta.lev.automaton;
 
-import java.util.Collection;
-import java.util.LinkedList;
-
 public class ClassicLevenshtein {
 
     /**
@@ -129,37 +126,5 @@ public class ClassicLevenshtein {
     public static boolean isWithinEditDistanceNonAutomaton(
             int maxEditDistance, String str1, String str2) {
         return (computeEditDistance(str1, str2) <= maxEditDistance);
-    }
-
-    /**
-     * Searches a collection of Strings for those which are within a given edit distance from a
-     * particular String.
-     *
-     * <p>This version of fuzzy search uses a dynamic programming approach, and its usage is advised
-     * for edit distances of 3 or greater (at those edit distances, in most cases, it is faster than
-     * an automaton based approach and does not require a large amount of memory)
-     *
-     * @param maxEditDistance an int denoting the maximum amount of edit operations that can
-     *     separate a String in the to-be-searched collection with the String of interest
-     * @param pertinentStr the String that all edit-distance calculations are to be carried out in
-     *     relation to
-     * @param strCollection a Collection containing the set of Strings to be processed against
-     *     {@code pertinentStr}
-     * @return a LinkedList containing all the Strings in {@code mdag} that are at most {@code
-     *     maxEditDistance} away from {@code automatonString}
-     */
-    public static LinkedList<String> fuzzySearchNonAutomaton(
-            int maxEditDistance, String pertinentStr, Collection<String> strCollection) {
-        LinkedList<String> resultStringLinkedList = new LinkedList<>();
-
-        // Loop through the Strings in strCollection, computing the edit distance between each and
-        // pertinentStr and adding those to resultStringLinkedList with a distance <=
-        // maxEditDistance
-        for (String currentString : strCollection) {
-            if (computeEditDistance(pertinentStr, currentString) <= maxEditDistance)
-                resultStringLinkedList.add(currentString);
-        }
-
-        return resultStringLinkedList;
     }
 }

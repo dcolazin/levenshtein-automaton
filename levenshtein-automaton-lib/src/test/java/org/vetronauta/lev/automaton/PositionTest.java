@@ -208,65 +208,6 @@ public class PositionTest {
         }
     }
 
-    @DataProvider(name = "getPositionTransitionDataDP")
-    Object[][] getPositionTransitionDataDataProvider() {
-        int testCount = 1000;
-
-        int maxN = 100;
-        Object[][] argArrayContainerArray = new Object[testCount][];
-
-        for (int i = 0; i < testCount; i++) {
-            int randomN = (int) (Math.random() * maxN);
-            int rsSize = 2 * randomN + 1;
-
-            AugBitSet characteristicVec = new AugBitSet(rsSize);
-            for (int j = 0; j < rsSize; j++)
-                characteristicVec.set(j, ((int) (Math.random() * 2)) == 1);
-
-            int randomStartIndex = (int) (Math.random() * rsSize) + (i % 2 == 0 ? 1 : 0);
-
-            argArrayContainerArray[i] = new Object[] {randomN, randomStartIndex, characteristicVec};
-        }
-
-        return argArrayContainerArray;
-    }
-
-    @Test(dataProvider = "getPositionTransitionDataDP")
-    void getPositionTransitionDataTest(
-            int maxEditDistance, int positionStartIndex, AugBitSet stateRSCharacteristicVector) {
-        int stateRSSize = stateRSCharacteristicVector.getRelevantBitSetSize();
-
-        int randomE = (int) (Math.random() * maxEditDistance);
-        boolean randomT =
-                (positionStartIndex <= stateRSSize - 2) && (((int) (Math.random() * 2)) == 0);
-
-        int[] transitionDataArray =
-                (new Position(positionStartIndex, randomE, randomT))
-                        .procurePositionTransitionData(
-                                maxEditDistance, positionStartIndex, stateRSCharacteristicVector);
-
-        Assert.assertEquals(
-                transitionDataArray[0],
-                (positionStartIndex == stateRSSize
-                        ? 0
-                        : Math.min(
-                                maxEditDistance - randomE + 1, stateRSSize - positionStartIndex)));
-        Assert.assertEquals(
-                transitionDataArray[1],
-                (positionStartIndex == stateRSSize
-                        ? -1
-                        : stateRSCharacteristicVector
-                                .get(
-                                        positionStartIndex,
-                                        positionStartIndex
-                                                + Math.min(
-                                                        maxEditDistance - randomE + 1,
-                                                        stateRSCharacteristicVector
-                                                                        .getRelevantBitSetSize()
-                                                                - positionStartIndex))
-                                .nextSetBit(0)));
-    }
-
     @Test
     void subsumesTest() {
         for (int i = 0; i < 1000; i++) {

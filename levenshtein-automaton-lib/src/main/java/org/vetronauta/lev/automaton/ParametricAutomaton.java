@@ -185,15 +185,6 @@ public final class ParametricAutomaton {
     }
 
     /**
-     * Returns the number of parametric state forms discovered so far.
-     *
-     * @return an int of the number of discovered parametric states
-     */
-    public synchronized int getStateCount() {
-        return stateCount;
-    }
-
-    /**
      * Executes (memoizing) a transition of a parametric state on a packed characteristic vector.
      *
      * <p>On first encounter of a (state, vector) pair the transition is computed from the
@@ -230,7 +221,9 @@ public final class ParametricAutomaton {
     private TransitionTable computeTransition(
             int stateId, long packedVector, TransitionTable current) {
         State sourceState = getStateById(stateId).createActualState(0);
-        State targetState = sourceState.transition(maxEditDistance, toAugBitSet(packedVector));
+        State targetState =
+                sourceState.transition(
+                        maxEditDistance, vectorBits(packedVector), vectorSize(packedVector));
 
         long packedTransition;
         if (targetState == null) {
@@ -324,19 +317,6 @@ public final class ParametricAutomaton {
      */
     public static long vectorBits(long packedVector) {
         return (packedVector >>> VECTOR_SIZE_BITS);
-    }
-
-    /** Materializes an AugBitSet from a packed vector (used only on memo-miss computations). */
-    private static AugBitSet toAugBitSet(long packedVector) {
-        int size = vectorSize(packedVector);
-        long bits = vectorBits(packedVector);
-
-        AugBitSet characteristicVector = new AugBitSet(size);
-        for (int i = 0; i < size; i++) {
-            if ((bits & (1L << i)) != 0) characteristicVector.set(i);
-        }
-
-        return characteristicVector;
     }
 
     /** Copy-on-write insertion into a snapshot's sorted arrays. */

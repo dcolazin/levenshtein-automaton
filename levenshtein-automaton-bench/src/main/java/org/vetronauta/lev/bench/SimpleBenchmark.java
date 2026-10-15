@@ -58,7 +58,7 @@ public class SimpleBenchmark {
 
     @Benchmark
     public boolean automaton() {
-        return LevenshteinAutomaton.isWithinEditDistance(4, "kitten", "sitting");
+        return LevenshteinAutomaton.compile("kitten", 4).accepts("sitting");
     }
 
     @Benchmark

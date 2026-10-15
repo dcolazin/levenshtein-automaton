@@ -405,22 +405,23 @@ public class Position implements Comparable<Position> {
     }
 
     /**
-     * Procures data necessary for the execution of a transition on this Position.
+     * Carries out a transition on this Position given the primitive characteristic vector of its
+     * parent State's relevant subword.
      *
      * @param maxEditDistance an int denoting the maximum edit operation count
-     * @param relevantSubwordStartIndex an int denoting the index in the parent State's relevant
-     *     subword that this Position's relevant subword starts from
-     * @param parentStateRelevantSubwordCharacteristicVector an AugBitSet representing the parent
-     *     State's relevant subword characteristic vector (created with respect to the
-     *     processing/transitioning char)
-     * @return an array containing: - an int of this Position's relevant subword size (index 0) - an
-     *     int of the first index in this Position's relevant subword containing the first
-     *     occurrence of the processing/transition char (index 1)
+     * @param parentStateRelevantSubwordLocationIndex an int of the index in the parent State's
+     *     relevant subword that this Position's relevant subword starts from
+     * @param parentVectorBits a long whose bit k denotes whether position k of the parent State's
+     *     relevant subword holds the processing/transition char
+     * @param parentVectorSize an int of the bit count of the parent State's characteristic vector
+     * @return the State resulting from executing a transition on this Position, or null if the
+     *     transition is a failure
      */
-    public int[] procurePositionTransitionData(
+    public State transition(
             int maxEditDistance,
-            int relevantSubwordStartIndex,
-            AugBitSet parentStateRelevantSubwordCharacteristicVector) {
+            int parentStateRelevantSubwordLocationIndex,
+            long parentVectorBits,
+            int parentVectorSize) {
         // int which will contain the value of this Position's relevant subword size
         int relevantSubwordSize;
 
@@ -428,59 +429,28 @@ public class Position implements Comparable<Position> {
         // that the transition is being carried out for in this Position's relevant subword
         int firstHitIndex;
 
-        // AugBitSet which will represent the characteristic vector of this Position's relevant
-        // subowrd
-        AugBitSet relevantSubwordCharacteristicVector;
-
-        if (relevantSubwordStartIndex
-                < parentStateRelevantSubwordCharacteristicVector.getRelevantBitSetSize()) {
+        if (parentStateRelevantSubwordLocationIndex < parentVectorSize) {
             relevantSubwordSize =
                     Math.min(
                             maxEditDistance - E + 1,
-                            parentStateRelevantSubwordCharacteristicVector.getRelevantBitSetSize()
-                                    - relevantSubwordStartIndex);
+                            parentVectorSize - parentStateRelevantSubwordLocationIndex);
 
-            relevantSubwordCharacteristicVector =
-                    parentStateRelevantSubwordCharacteristicVector.get(
-                            relevantSubwordStartIndex,
-                            relevantSubwordStartIndex + relevantSubwordSize);
-            firstHitIndex = relevantSubwordCharacteristicVector.nextSetBit(0);
+            // Window the parent vector onto this Position's relevant subword and locate
+            // the first occurance of the processing/transition char within it
+            long relevantSubwordBits =
+                    (parentVectorBits >>> parentStateRelevantSubwordLocationIndex)
+                            & ((1L << relevantSubwordSize) - 1);
+            firstHitIndex =
+                    (relevantSubwordBits == 0L
+                            ? -1
+                            : Long.numberOfTrailingZeros(relevantSubwordBits));
         } else {
             relevantSubwordSize = 0;
             firstHitIndex = -1;
         }
 
-        return new int[] {relevantSubwordSize, firstHitIndex};
-    }
-
-    /**
-     * Carries out a transition on this Position.
-     *
-     * @param maxEditDistance an int denoting the maximum edit operation count
-     * @param parentStateRelevantSubwordLocationIndex an int of the index in the parent State's
-     *     relevant subword that this Position's relevant subword starts from
-     * @param parentStateRelevantSubwordCharacteristicVector an AugBitSet representation of the
-     *     parent State's relevant subword characteristic vector (created with respect to the
-     *     processing/transition char)
-     * @return
-     */
-    public State transition(
-            int maxEditDistance,
-            int parentStateRelevantSubwordLocationIndex,
-            AugBitSet parentStateRelevantSubwordCharacteristicVector) {
-        // Procure an array containing this Position's relevant subword size (index 0) and the index
-        // in the
-        // Position's relevant subword containing the first occurance of the processing/transition
-        // char (index 1)
-        int[] positionTransitionDataArray =
-                procurePositionTransitionData(
-                        maxEditDistance,
-                        parentStateRelevantSubwordLocationIndex,
-                        parentStateRelevantSubwordCharacteristicVector);
-
         // Carry out the actual transition operations
-        return transitionInternal(
-                maxEditDistance, positionTransitionDataArray[0], positionTransitionDataArray[1]);
+        return transitionInternal(maxEditDistance, relevantSubwordSize, firstHitIndex);
     }
 
     /**

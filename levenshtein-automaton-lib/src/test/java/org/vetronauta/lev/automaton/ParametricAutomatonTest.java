@@ -75,11 +75,6 @@ public class ParametricAutomatonTest {
                             iterative.accepts(candidate),
                             expected,
                             "iterative accepts; " + context);
-                    Assert.assertEquals(
-                            LevenshteinAutomaton.isWithinEditDistance(
-                                    maxEditDistance, reference, candidate),
-                            expected,
-                            "deprecated static isWithinEditDistance; " + context);
                 }
             }
         }
@@ -243,11 +238,11 @@ public class ParametricAutomatonTest {
     }
 
     /**
-     * Checks that the occurrence-mask packed vectors equal the State-derived characteristic
-     * vectors.
+     * Checks that the occurrence-mask packed vectors equal the characteristic vectors computed
+     * directly from the reference string (independent first-principles oracle).
      */
     @Test
-    public void packedVectorMatchesStateComputation() {
+    public void packedVectorMatchesFirstPrinciples() {
         int[] distances = {0, 1, 2};
         char[] letters = {'a', 'b', 'z'};
 
@@ -259,23 +254,20 @@ public class ParametricAutomatonTest {
                 for (int minimalBoundary = 0;
                         minimalBoundary <= reference.length();
                         minimalBoundary++) {
-                    State dummyState =
-                            new State(new Position[] {new Position(minimalBoundary, 0, false)});
+                    int expectedSize =
+                            Math.min(2 * maxEditDistance + 1, reference.length() - minimalBoundary);
+                    if (expectedSize < 0) expectedSize = 0;
 
                     for (char letter : letters) {
-                        AugBitSet expected =
-                                dummyState.getRelevantSubwordCharacteristicVector(
-                                        maxEditDistance, reference, letter);
-
                         long expectedBits = 0L;
-                        for (int i = 0; i < expected.getRelevantBitSetSize(); i++) {
-                            if (expected.get(i)) expectedBits |= (1L << i);
+                        for (int k = 0; k < expectedSize; k++) {
+                            if (reference.charAt(minimalBoundary + k) == letter)
+                                expectedBits |= (1L << k);
                         }
 
                         Assert.assertEquals(
                                 automaton.packedVector(minimalBoundary, letter),
-                                ParametricAutomaton.packVector(
-                                        expectedBits, expected.getRelevantBitSetSize()),
+                                ParametricAutomaton.packVector(expectedBits, expectedSize),
                                 "reference='"
                                         + reference
                                         + "', n="
@@ -332,9 +324,25 @@ public class ParametricAutomatonTest {
                 () ->
                         ParametricAutomaton.forDistance(
                                 ParametricAutomaton.MAX_SUPPORTED_EDIT_DISTANCE + 1));
+
+        // A window exceeding 63 bits requires BOTH a long reference string AND a large distance:
+        // such instances degrade gracefully to the DP-backed mode instead of throwing
+        LevenshteinAutomaton degraded = LevenshteinAutomaton.compile("x".repeat(64), 32);
+        Assert.assertFalse(degraded.isTableBased());
+        Assert.assertTrue(degraded.accepts("x".repeat(70))); // lev = 6 <= 32 (DP path)
+        Assert.assertTrue(degraded.accepts("x".repeat(64) + "y")); // lev = 1 (DP path)
+        Assert.assertFalse(degraded.accepts("y".repeat(97))); // |64-97| = 33 > 32: length bound
+        Assert.assertFalse(degraded.accepts("y".repeat(90))); // lev = 90 > 32 (DP path)
+
+        // lev(s, x) <= |s| + |x| (delete all of s, insert all of x): trivial acceptance
+        Assert.assertTrue(
+                LevenshteinAutomaton.compile("x".repeat(64), 200).accepts("y".repeat(50)));
+
+        // n = 31 on a 64-char string still simulates (the window fits in 63 bits)
+        Assert.assertTrue(LevenshteinAutomaton.compile("x".repeat(64), 31).accepts("x".repeat(70)));
     }
 
-    /** Checks instance accessors and the memo-mode dispatch of fuzzySearch. */
+    /** Checks instance accessors. */
     @Test
     public void instanceMetadataIsExposed() {
         LevenshteinAutomaton tableBased = LevenshteinAutomaton.compile("kitten", 2);

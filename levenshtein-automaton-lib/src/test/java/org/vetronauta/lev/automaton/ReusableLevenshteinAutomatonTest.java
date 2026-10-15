@@ -6,22 +6,19 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import org.testng.Assert;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
-import org.vetronauta.lev.mdag.MDAG;
 
 /**
  * Tests that a compiled {@link LevenshteinAutomaton} instance can be reused for any number of
- * membership queries and dictionary searches, always agreeing with the dynamic-programming baseline
- * and with the deprecated static entry points.
+ * membership queries against a real dictionary, always agreeing with the dynamic-programming
+ * baseline — for both compilation modes.
  */
 public class ReusableLevenshteinAutomatonTest {
 
     private final List<String> wordArrayList = new ArrayList<>();
-    private MDAG mdag = null;
 
     @BeforeClass
     public void initializer() throws IOException {
@@ -34,21 +31,6 @@ public class ReusableLevenshteinAutomatonTest {
                 wordArrayList.add(currentWord);
             }
         }
-
-        mdag = new MDAG(wordArrayList);
-    }
-
-    /**
-     * Procures the expected neighbors of a word within a max edit distance, via the DP baseline.
-     */
-    private HashSet<String> baselineNeighbors(String word, int maxEditDistance) {
-        HashSet<String> neighbors = new HashSet<>();
-        for (String currentWord : wordArrayList) {
-            if (ClassicLevenshtein.computeEditDistance(word, currentWord) <= maxEditDistance) {
-                neighbors.add(currentWord);
-            }
-        }
-        return neighbors;
     }
 
     /** A few deterministic (word, distance) combinations exercised by the tests below. */
@@ -58,7 +40,8 @@ public class ReusableLevenshteinAutomatonTest {
             {1, wordArrayList.get(0)},
             {1, wordArrayList.get(wordCount / 2)},
             {2, wordArrayList.get(wordCount / 3)},
-            {2, wordArrayList.get(wordCount - 1)}
+            {2, wordArrayList.get(wordCount - 1)},
+            {3, wordArrayList.get(wordCount / 4)}
         };
     }
 
@@ -72,7 +55,7 @@ public class ReusableLevenshteinAutomatonTest {
             int maxEditDistance = (Integer) combination[0];
             String word = (String) combination[1];
 
-            LevenshteinAutomaton tableBased = LevenshteinAutomaton.compile(word, maxEditDistance);
+            LevenshteinAutomaton memoBased = LevenshteinAutomaton.compile(word, maxEditDistance);
             LevenshteinAutomaton iterative =
                     LevenshteinAutomaton.compileIterative(word, maxEditDistance);
 
@@ -84,59 +67,10 @@ public class ReusableLevenshteinAutomatonTest {
                         "word='" + word + "', candidate='" + candidate + "', n=" + maxEditDistance;
 
                 Assert.assertEquals(
-                        tableBased.accepts(candidate), expected, "table-based; " + context);
+                        memoBased.accepts(candidate), expected, "memo-based; " + context);
                 Assert.assertEquals(
                         iterative.accepts(candidate), expected, "iterative; " + context);
             }
-        }
-    }
-
-    /**
-     * Checks that dictionary searches driven by compiled instances (both modes and the dispatching
-     * fuzzySearch) return exactly the DP baseline neighbor set, and agree with the deprecated
-     * static methods.
-     */
-    @Test
-    public void reusedInstanceFuzzySearchMatchesBaselineAndStatics() {
-        for (Object[] combination : testCombinations()) {
-            int maxEditDistance = (Integer) combination[0];
-            String word = (String) combination[1];
-
-            HashSet<String> expected = baselineNeighbors(word, maxEditDistance);
-
-            LevenshteinAutomaton tableBased = LevenshteinAutomaton.compile(word, maxEditDistance);
-            LevenshteinAutomaton iterative =
-                    LevenshteinAutomaton.compileIterative(word, maxEditDistance);
-
-            String context = "word='" + word + "', n=" + maxEditDistance;
-
-            Assert.assertEquals(
-                    new HashSet<>(tableBased.tableFuzzySearch(mdag)),
-                    expected,
-                    "table-based tableFuzzySearch; " + context);
-            Assert.assertEquals(
-                    new HashSet<>(tableBased.fuzzySearch(mdag)),
-                    expected,
-                    "table-based fuzzySearch dispatch; " + context);
-            Assert.assertEquals(
-                    new HashSet<>(iterative.iterativeFuzzySearch(mdag)),
-                    expected,
-                    "iterative iterativeFuzzySearch; " + context);
-            Assert.assertEquals(
-                    new HashSet<>(iterative.fuzzySearch(mdag)),
-                    expected,
-                    "iterative fuzzySearch dispatch; " + context);
-
-            Assert.assertEquals(
-                    new HashSet<>(
-                            LevenshteinAutomaton.tableFuzzySearch(maxEditDistance, word, mdag)),
-                    expected,
-                    "deprecated static tableFuzzySearch; " + context);
-            Assert.assertEquals(
-                    new HashSet<>(
-                            LevenshteinAutomaton.iterativeFuzzySearch(maxEditDistance, word, mdag)),
-                    expected,
-                    "deprecated static iterativeFuzzySearch; " + context);
         }
     }
 

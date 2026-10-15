@@ -105,3 +105,44 @@ design.
 - [x] Bench: distance-4 and distance-8 reuse scenarios run out of the box (construction is
       instant); `Main` demo includes distance 8
 - [x] README/PLAN/TODO updated; full `mvn test` green
+
+## Phase 7 — Post-MDAG slimming (throw away more first-implementation code)
+
+Motivation: with the MDAG dictionary gone (user's cleanup), the remaining first-implementation code
+was dead weight — and `ReusableLevenshteinAutomatonTest` still referenced the deleted MDAG, so the
+test suite did not even compile. See `PLAN.md` section 9 for the design notes.
+
+- [x] Fixed the broken test compile: `ReusableLevenshteinAutomatonTest` rewritten sans MDAG
+      (dictionary baseline for both compilation modes, distances 1–3 + repeated-query stability)
+- [x] `AugBitSet` deleted entirely (167 lines); `State`/`Position` transitions operate on
+      primitive `(bits, size)` vectors; the memo miss path passes unpacked primitives (no per-miss
+      allocation)
+- [x] Deleted `State.getRelevantSubwordCharacteristicVector`, `State.transition(int, String, char)`,
+      `State.canBeState`, `Position.procurePositionTransitionData` (folded into the primitive
+      `transition(int, int, long, int)`), `ParametricState`'s offset remnants (field, constructor,
+      getter, `toString` branch), `ParametricAutomaton.getStateCount()`, `toAugBitSet()`,
+      `ClassicLevenshtein.fuzzySearchNonAutomaton`, and the deprecated static facade
+      `LevenshteinAutomaton.isWithinEditDistance(int, String, String)`
+- [x] `LevenshteinAutomaton`: occurrence masks built in both modes (simulation uses them too via
+      `windowBits`); stale `fuzzySearch` Javadoc removed
+- [x] Window-fit validation added: `|s| > 63 && n > 31` now throws `IllegalArgumentException`
+      (tested, including the boundary case `n = 31` on a 64-char string)
+- [x] Tests: `StateTest` and `LevenshteinAutomatonTest` deleted (coverage consolidated);
+      `PositionTest` trimmed; packed-vector parity now uses a first-principles oracle
+- [x] Bench single-shot scenario uses `compile(...).accepts(...)`; README de-MDAG-ed;
+      `dependency-reduced-pom.xml` git-ignored
+- [x] Full `mvn clean test` green: 2013 tests, 0 failures, 0 errors (main sources 2334 → 1804
+      lines)
+
+## Phase 7.1 — Graceful degradation for extreme distances on long strings
+
+Follow-up to the Phase 7 window cap (which initially threw `IllegalArgumentException` for
+`|s| > 63 && n > 31`): `compile` now degrades that corner to a DP-backed membership check, so no
+(distance, length) combination is ever rejected. Long strings were always usable for practical
+distances (memo ≤ 28, simulation ≤ 31); now nothing throws.
+
+- [x] `dpBacked` mode in `LevenshteinAutomaton`: length-bound reject (`||s|−|x|| > n`), trivial
+      accept (`|s|+|x| <= n`), then `ClassicLevenshtein` DP
+- [x] Occurrence masks skipped for DP-backed instances (null — never used)
+- [x] Tests: degraded-mode correctness covering all three answer paths + the `n = 31` boundary
+- [x] README, PLAN §8.4/§9 amended; full build green

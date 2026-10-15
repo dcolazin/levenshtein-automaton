@@ -273,9 +273,11 @@ encounter, so the reachable set is covered trivially and unreachable forms cost 
   *regardless of n* (windows are `min(2n+1, |s| − minB)`), so the packing could represent any
   distance. The code gates on `n` alone for simplicity; a possible refinement is to gate on
   `min(2n+1, |s|) ≤ 57` and allow any `n` for short strings.
-- **Beyond 28**, `compile` transparently downgrades to simulation: still correct for any `int`
-  `n`, but per-query cost is O(|candidate| · n) with no memo (a performance cliff, not a
-  correctness gap), and `tableFuzzySearch` throws `IllegalStateException`.
+- **Beyond 28**, `compile` transparently downgrades to simulation: still automaton-based and
+  correct, with per-query cost O(|candidate| · n) and no memo (a performance cliff, not a
+  correctness gap). Beyond the 64-bit window limit (`n > 31` on strings longer than 63 chars),
+  instances degrade further to a DP-backed membership check (length bounds plus the
+  dynamic-programming baseline), so no (distance, length) combination is ever rejected.
 
 ### 8.5 Resource properties
 
@@ -284,3 +286,42 @@ encounter, so the reachable set is covered trivially and unreachable forms cost 
   itself is capped at 29 entries (distances 0–28).
 - Transition misses serialize on a single lock per distance (no deadlock by construction; reads
   are lock-free immutable snapshots).
+
+## 9. Post-MDAG slimming (Phase 7)
+
+With the MDAG dictionary removed (it was only ever a consumer of the automaton), the remaining
+first-implementation remnants became dead and were deleted:
+
+- **`AugBitSet` (whole class)** — the object-based characteristic vector. `State`/`Position`
+  transitions now operate directly on primitive `(bits, size)` windows (`long` + `int`), and the
+  memo's miss path passes unpacked primitives, removing the last per-miss allocation and the
+  `relevantBitSetSize` bookkeeping.
+- `State.getRelevantSubwordCharacteristicVector` and `State.transition(int, String, char)` — the
+  string-window computation lives in `LevenshteinAutomaton` (occurrence-mask based, now built in
+  both compilation modes) and feeds `State.transition(int, long, int)`.
+- `Position.procurePositionTransitionData` — folded into the primitive
+  `Position.transition(int, int, long, int)` (windowing is a shift-and-mask; first-hit is
+  `numberOfTrailingZeros`).
+- `State.canBeState` — its only caller was the eager enumeration deleted in Phase 6.
+- `ParametricState`'s `transitionBoundaryOffset` (field, constructor, getter, `toString` branch) —
+  offsets are packed into the memo's transition values since Phase 6.
+- `ParametricAutomaton.getStateCount()` and `toAugBitSet()`.
+- `ClassicLevenshtein.fuzzySearchNonAutomaton` — the collection-based dictionary search.
+- The deprecated static facade `LevenshteinAutomaton.isWithinEditDistance(int, String, String)` —
+  the last remnant of the original static API (its MDAG siblings were already gone; tests and the
+  benchmark now use the instance API).
+- Tests: `StateTest` (tested only deleted methods) and `LevenshteinAutomatonTest` (duplicated the
+  dictionary-baseline coverage now consolidated in `ReusableLevenshteinAutomatonTest`) were
+  deleted; `PositionTest`'s `getPositionTransitionData` block went with the method it tested; the
+  packed-vector parity test now uses an independent first-principles oracle instead of the deleted
+  `State` helper.
+
+**Representability consequence:** with `AugBitSet` gone, characteristic-vector windows must fit
+in a `long`; the former "arbitrary `n` on arbitrary strings" simulation relied exactly on the
+object-based vectors deleted here (a theoretical affordance only: distances beyond ~30 accept
+essentially everything, and the memo is limited to 28 anyway). Rather than rejecting the corner
+(`|s| > 63 && n > 31`), `compile` degrades it gracefully to a DP-backed membership check —
+length-bound fast paths plus the dynamic-programming baseline, the appropriate algorithm at such
+distances — so the library remains usable for every (distance, length) combination. Long strings
+are unaffected for all practical distances: memo `n <= 28`, simulation `n <= 31`, any `n` for
+`|s| <= 63`.

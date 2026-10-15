@@ -27,9 +27,6 @@ LevenshteinAutomaton automaton = LevenshteinAutomaton.compile("kitten", 2);
 automaton.accepts("sitting");             // lev("kitten", "sitting") <= 2 → false
 automaton.isWithinEditDistance("mitten"); // true, same instance
 automaton.isWithinEditDistance("kitten"); // true, memoized lookups only
-
-// dictionary (MDAG) search reusing the same compiled instance
-LinkedList<String> neighbors = automaton.fuzzySearch(mdag);
 ```
 
 Two compilation modes are available:
@@ -43,7 +40,8 @@ Two compilation modes are available:
 - `LevenshteinAutomaton.compileIterative(s, n)` — table-free. Transitions are computed on the fly
   with no shared memo growth at all. Useful when even memoized state growth is undesired.
 
-The pre-refactor static entry points (`LevenshteinAutomaton.isWithinEditDistance`,
-`tableFuzzySearch`, `iterativeFuzzySearch`) are deprecated delegators kept for backward
-compatibility: they rebuild an automaton per call, so prefer compiling and reusing instances. See
-`PLAN.md` for the full design rationale.
+Reference strings of any length are supported for every practical max edit distance. Only the
+extreme corner of large distances on long strings (`|s| > 63` and `n > 31`) degrades gracefully:
+those instances answer membership queries via length bounds plus the dynamic-programming
+baseline, the appropriate algorithm at such distances anyway. See `PLAN.md` for the full design
+rationale.

@@ -38,3 +38,6 @@ build/
 ### Mac OS ###
 .DS_Store
 .idea/copilot*
+
+### Maven shade ###
+levenshtein-automaton-bench/dependency-reduced-pom.xml

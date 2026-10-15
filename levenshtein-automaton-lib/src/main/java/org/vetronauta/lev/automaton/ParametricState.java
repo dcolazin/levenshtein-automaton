@@ -43,11 +43,6 @@ public class ParametricState {
     // status of a member position in a state of this form.
     private final boolean[] memberPositionTArray;
 
-    // Int denoting the difference between the minimal boundary of a State of this form and
-    // that of a given State which has a transition such a State. This value is dependant on
-    // the transitioning state as well as the characterisitc vector of its relevant subword.
-    private int transitionBoundaryOffset = 0;
-
     // Int denoting min(e_j - offset_j) over the member positions of a State of this form. A
     // concrete State of this form with minimal boundary minB is accepting with respect to a string
     // of length L and a max edit distance n iff minB >= L - n + acceptanceThresholdOffset.
@@ -87,35 +82,12 @@ public class ParametricState {
     }
 
     /**
-     * Constructs a ParametricState from a State and sets its transition boundary offset.
-     *
-     * @param state a State object
-     * @param transitionBoundaryOffset an int of the difference between the minimal boundary of
-     *     {@code state} and that of a State that would be the result of an instantiation of the
-     *     to-be-created ParametricState
-     */
-    public ParametricState(State state, int transitionBoundaryOffset) {
-        this(state);
-        this.transitionBoundaryOffset = transitionBoundaryOffset;
-    }
-
-    /**
      * Returns the largest relative boundary of a position in a State of this form.
      *
      * @return an int denoting the largest boundary of a position in a State of this form
      */
     public int getLargestPositionOffset() {
         return memberPositionBoundaryOffsetArray[memberPositionBoundaryOffsetArray.length - 1];
-    }
-
-    /**
-     * Returns the this ParametricState's transition boundary offset.
-     *
-     * @return an int denoting the difference between the minimal boundary of a State of this form
-     *     and that of a State that has a transition to it
-     */
-    public int getTransitionBoundaryOffset() {
-        return transitionBoundaryOffset;
     }
 
     /**
@@ -218,8 +190,7 @@ public class ParametricState {
     /**
      * Returns a String representation of this ParametricState.
      *
-     * @return a String of this ParametricState's parametric positions, as well as its
-     *     transitionBoundaryOffset (if it != 0)
+     * @return a String of this ParametricState's parametric positions
      */
     @Override
     public String toString() {
@@ -241,9 +212,6 @@ public class ParametricState {
                     .append("(#")
                     .append(memberPositionEArray[i])
                     .append(")");
-
-        if (transitionBoundaryOffset != 0)
-            returnString.append(" ").append(transitionBoundaryOffset);
 
         return returnString.toString();
     }
